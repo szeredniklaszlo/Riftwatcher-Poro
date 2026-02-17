@@ -22,6 +22,7 @@ It pulls live data from Riot's APIs, calculates each player's daily record, rank
 ## Commands
 
 - `!Mood` - Generate and post today's ranked mood report.
+- `!Add Name#Tag` - Add a new tracked player at runtime.
 - `!test` - Simple Discord send test.
 - `!riottest` - Basic Riot connectivity test.
 
@@ -63,6 +64,14 @@ Required environment variables:
 Optional environment variables:
 
 - `RIOT_FRIENDS` (comma-separated Riot IDs, for example `PlayerOne#EUW,PlayerTwo#NA1`)
+- `PLAYERS_FILE` (path to persisted tracked players file, default: `tracked_players.txt`)
+
+## Player Persistence
+
+- Runtime `!Add` updates are saved to `tracked_players.txt` (or `PLAYERS_FILE` path).
+- If the file exists, startup loads players from it; otherwise startup uses `RIOT_FRIENDS`.
+- `tracked_players.txt` is ignored by git.
+- On Railway, filesystem storage is ephemeral across rebuilds/redeploys, so `!Add` entries may reset unless you move persistence to a database.
 
 ## Railway Deployment (GitLab CI)
 
