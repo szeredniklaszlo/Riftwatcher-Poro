@@ -9,12 +9,14 @@ deploy_to_railway:
   before_script:
     - npm install -g @railway/cli
   script:
-    - test -n "$RAILWAY_TOKEN" || (echo "Missing RAILWAY_TOKEN" && exit 1)
-    - test -n "$RAILWAY_SERVICE_ID$RAILWAY_PROJECT_ID" || (echo "Set RAILWAY_SERVICE_ID or RAILWAY_PROJECT_ID" && exit 1)
-    - railway --version
-    - export RAILWAY_ARGS=""
-    - if [ -n "$RAILWAY_SERVICE_ID" ]; then export RAILWAY_ARGS="$RAILWAY_ARGS --service $RAILWAY_SERVICE_ID"; fi
-    - if [ -n "$RAILWAY_ENVIRONMENT_ID" ]; then export RAILWAY_ARGS="$RAILWAY_ARGS --environment $RAILWAY_ENVIRONMENT_ID"; fi
-    - if [ -n "$RAILWAY_PROJECT_ID" ]; then export RAILWAY_ARGS="$RAILWAY_ARGS --project $RAILWAY_PROJECT_ID"; fi
-    - echo "Running: railway up --ci$RAILWAY_ARGS"
-    - eval "railway up --ci $RAILWAY_ARGS"
+    - |
+      set -e
+      test -n "${RAILWAY_TOKEN:-}" || { echo "Missing RAILWAY_TOKEN"; exit 1; }
+      test -n "${RAILWAY_SERVICE_ID:-}${RAILWAY_PROJECT_ID:-}" || { echo "Set RAILWAY_SERVICE_ID or RAILWAY_PROJECT_ID"; exit 1; }
+      railway --version
+      RAILWAY_ARGS=""
+      if [ -n "${RAILWAY_SERVICE_ID:-}" ]; then RAILWAY_ARGS="$RAILWAY_ARGS --service $RAILWAY_SERVICE_ID"; fi
+      if [ -n "${RAILWAY_ENVIRONMENT_ID:-}" ]; then RAILWAY_ARGS="$RAILWAY_ARGS --environment $RAILWAY_ENVIRONMENT_ID"; fi
+      if [ -n "${RAILWAY_PROJECT_ID:-}" ]; then RAILWAY_ARGS="$RAILWAY_ARGS --project $RAILWAY_PROJECT_ID"; fi
+      echo "Running: railway up --ci$RAILWAY_ARGS"
+      eval "railway up --ci $RAILWAY_ARGS"
