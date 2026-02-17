@@ -67,13 +67,17 @@ Optional environment variables:
 - `RIOT_FRIENDS` (comma-separated Riot IDs, for example `PlayerOne#EUW,PlayerTwo#NA1`)
 - `PLAYERS_FILE` (path to persisted tracked players file, default: `tracked_players.txt`)
 - `REPORT_TIMEZONE` (IANA timezone for daily cutoff, default: `UTC`, example: `Europe/Oslo`)
+- `DATABASE_URL` (Postgres connection string; when set, players + puuids persist in Postgres)
 
 ## Player Persistence
 
-- Runtime `!Add` updates are saved to `tracked_players.txt` (or `PLAYERS_FILE` path).
-- If the file exists, startup loads players from it; otherwise startup uses `RIOT_FRIENDS`.
+- Preferred: set `DATABASE_URL` (Railway Postgres).  
+  - `!Add` persists `riot_id` in Postgres.
+  - `puuid` is also stored in Postgres and reused across restarts/redeploys.
+  - Startup loads tracked players from Postgres.
+- Fallback (when `DATABASE_URL` is not set): file-based `tracked_players.txt` via `PLAYERS_FILE`.
 - `tracked_players.txt` is ignored by git.
-- On Railway, filesystem storage is ephemeral across rebuilds/redeploys, so `!Add` entries may reset unless you move persistence to a database.
+- On Railway, file-based storage is ephemeral, so use Postgres for persistent state.
 
 ## Railway Deployment (GitLab CI)
 
@@ -97,3 +101,4 @@ Set these runtime variables in Railway service settings:
 - `RIOT_FRIENDS` (optional)
 - `PLAYERS_FILE` (optional)
 - `REPORT_TIMEZONE` (optional)
+- `DATABASE_URL` (recommended for persistence across redeploys)
