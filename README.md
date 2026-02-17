@@ -36,7 +36,10 @@ It pulls live data from Riot's APIs, calculates each player's daily record, rank
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install discord.py requests
+pip install -r requirements.txt
+set DISCORD_TOKEN=your_token
+set RIOT_API_KEY=your_riot_key
+set DISCORD_CHANNEL_ID=your_channel_id
 python Bot.py
 ```
 
@@ -49,7 +52,35 @@ python Bot.py
 5. Compute win rate and sort descending.
 6. Append no-match players at the bottom.
 
-## Notes
+## Configuration
 
-- The bot currently uses hardcoded config values in `Bot.py` (token, API key, channel, players).
-- For production use, move secrets back to environment variables or a local config file that is not committed.
+Required environment variables:
+
+- `DISCORD_TOKEN`
+- `RIOT_API_KEY`
+- `DISCORD_CHANNEL_ID`
+
+Optional environment variables:
+
+- `RIOT_FRIENDS` (comma-separated Riot IDs, for example `PlayerOne#EUW,PlayerTwo#NA1`)
+
+## Railway Deployment (GitLab CI)
+
+This repository includes:
+
+- `.gitlab-ci.yml` - deploy job for Railway on pushes to your default branch.
+- `railway.json` - Railway start command and restart policy.
+- `Procfile` - worker process declaration (`python Bot.py`).
+
+Set these CI/CD variables in GitLab (`Settings -> CI/CD -> Variables`):
+
+- `RAILWAY_TOKEN` (Railway token)
+- `RAILWAY_SERVICE_ID` (target Railway service ID) or `RAILWAY_PROJECT_ID`
+- `RAILWAY_ENVIRONMENT_ID` (optional, deploy target environment)
+
+Set these runtime variables in Railway service settings:
+
+- `DISCORD_TOKEN`
+- `RIOT_API_KEY`
+- `DISCORD_CHANNEL_ID`
+- `RIOT_FRIENDS` (optional)

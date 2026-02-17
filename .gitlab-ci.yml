@@ -1,0 +1,19 @@
+stages:
+  - deploy
+
+deploy_to_railway:
+  stage: deploy
+  image: node:20-alpine
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  before_script:
+    - npm install -g @railway/cli
+  script:
+    - test -n "$RAILWAY_TOKEN" || (echo "Missing RAILWAY_TOKEN" && exit 1)
+    - test -n "$RAILWAY_SERVICE_ID$RAILWAY_PROJECT_ID" || (echo "Set RAILWAY_SERVICE_ID or RAILWAY_PROJECT_ID" && exit 1)
+    - railway --version
+    - export RAILWAY_CMD="railway up --ci"
+    - if [ -n "$RAILWAY_SERVICE_ID" ]; then export RAILWAY_CMD="$RAILWAY_CMD --service $RAILWAY_SERVICE_ID"; fi
+    - if [ -n "$RAILWAY_ENVIRONMENT_ID" ]; then export RAILWAY_CMD="$RAILWAY_CMD --environment $RAILWAY_ENVIRONMENT_ID"; fi
+    - if [ -n "$RAILWAY_PROJECT_ID" ]; then export RAILWAY_CMD="$RAILWAY_CMD --project $RAILWAY_PROJECT_ID"; fi
+    - sh -lc "$RAILWAY_CMD"
