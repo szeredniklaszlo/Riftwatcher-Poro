@@ -9,10 +9,11 @@ It pulls live data from Riot's APIs, calculates each player's daily record, rank
 - Connects to Discord and listens in one configured channel.
 - Fetches player account and match data from Riot API.
 - Builds a "today only" report:
-  - Wins / losses
-  - Win rate percentage
-  - Mood emoji (green/yellow/red)
-- Sorts players from best to worst win rate.
+  - Separate win rates for `Ranked Solo/Duo`, `Ranked Flex`, and `Arcade`
+  - Total win rate across all modes
+  - Mood emoji scale (with skull at 0%)
+- Sorts players from best to worst total win rate.
+- Shows a `⭐` for the top-ranked player.
 - Shows players with no matches today at the end.
 - Responds to `!Mood` with:
   - A quick "working..." message
@@ -22,7 +23,7 @@ It pulls live data from Riot's APIs, calculates each player's daily record, rank
 ## Commands
 
 - `!Mood` - Generate and post today's ranked mood report.
-- `!Add Name#Tag` - Add a new tracked player at runtime.
+- `!Add Name#Tag` - Validate and add a new tracked player at runtime.
 - `!test` - Simple Discord send test.
 - `!riottest` - Basic Riot connectivity test.
 
@@ -47,10 +48,10 @@ python Bot.py
 ## How The Report Is Calculated
 
 1. Resolve each Riot ID (`gameName#tagLine`) to `puuid`.
-2. Pull recent matches from Match-V5.
-3. Keep only matches completed today (local date).
-4. Count wins and losses for each player.
-5. Compute win rate and sort descending.
+2. Pull today's matches from Match-V5 (`startTime` filter + timezone-aware day cutoff).
+3. Bucket each match into `Ranked Solo/Duo` (420), `Ranked Flex` (440), or `Arcade` (all other queues).
+4. Count wins and losses per bucket and in total.
+5. Compute total win rate and sort descending.
 6. Append no-match players at the bottom.
 
 ## Configuration
@@ -94,3 +95,5 @@ Set these runtime variables in Railway service settings:
 - `RIOT_API_KEY`
 - `DISCORD_CHANNEL_ID`
 - `RIOT_FRIENDS` (optional)
+- `PLAYERS_FILE` (optional)
+- `REPORT_TIMEZONE` (optional)
