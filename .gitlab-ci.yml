@@ -10,7 +10,12 @@ deploy_to_railway:
     - npm install -g @railway/cli
   script:
     - |
-      set -e
+      set -eux
+      command -v railway
+      echo "RAILWAY_TOKEN set: ${RAILWAY_TOKEN:+yes}"
+      echo "RAILWAY_SERVICE_ID set: ${RAILWAY_SERVICE_ID:+yes}"
+      echo "RAILWAY_PROJECT_ID set: ${RAILWAY_PROJECT_ID:+yes}"
+      echo "RAILWAY_ENVIRONMENT_ID set: ${RAILWAY_ENVIRONMENT_ID:+yes}"
       test -n "${RAILWAY_TOKEN:-}" || { echo "Missing RAILWAY_TOKEN"; exit 1; }
       test -n "${RAILWAY_SERVICE_ID:-}${RAILWAY_PROJECT_ID:-}" || { echo "Set RAILWAY_SERVICE_ID or RAILWAY_PROJECT_ID"; exit 1; }
       railway --version
