@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
 
 from src.report_logic import (
+    create_mode_records,
     format_mode_line,
     get_report_cycle_key,
     get_report_cycle_start_unix_seconds,
     get_match_end_unix_seconds,
     get_mode_bucket,
+    get_mode_totals,
     is_match_in_report_cycle,
     is_match_in_last_24h,
     rank_sort_key,
@@ -13,11 +15,11 @@ from src.report_logic import (
 )
 
 
-def test_get_mode_bucket_maps_ranked_and_arcade():
+def test_get_mode_bucket_maps_ranked_and_ignores_other_queues():
     assert get_mode_bucket(420) == "solo_duo"
     assert get_mode_bucket(440) == "flex"
-    assert get_mode_bucket(450) == "arcade"
-    assert get_mode_bucket(1700) == "arcade"
+    assert get_mode_bucket(450) is None
+    assert get_mode_bucket(1700) is None
 
 
 def test_wilson_lower_bound_prefers_consistent_sample():
@@ -39,6 +41,14 @@ def test_rank_sort_key_orders_by_wilson_then_volume():
 def test_format_mode_line_handles_empty_and_non_empty():
     assert format_mode_line("Arcade", 0, 0) == "   Arcade: `0W-0L` - **N/A**"
     assert format_mode_line("Arcade", 3, 1) == "   Arcade: `3W-1L` - **75.0%**"
+
+
+def test_get_mode_totals_counts_ranked_only():
+    records = create_mode_records()
+    records["solo_duo"]["wins"] = 2
+    records["flex"]["losses"] = 1
+    records["arcade"]["wins"] = 99
+    assert get_mode_totals(records) == (2, 1)
 
 
 def test_get_match_end_unix_seconds_falls_back_when_end_timestamp_missing():

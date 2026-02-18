@@ -23,7 +23,6 @@ MoodBot is a Discord bot that tracks League match mood for a tracked player list
   - Total
   - Ranked Solo/Duo
   - Ranked Flex
-  - Arcade
 - Ranking based on Wilson lower bound (`z=1.28`).
 - Displays `Gamer Score` (Wilson score x 100) per player.
 - Background refresh stores/reuses data in Postgres.

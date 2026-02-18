@@ -278,8 +278,8 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records):
     flex_losses = mode_records["flex"]["losses"]
     arcade_wins = mode_records["arcade"]["wins"]
     arcade_losses = mode_records["arcade"]["losses"]
-    total_wins = solo_wins + flex_wins + arcade_wins
-    total_losses = solo_losses + flex_losses + arcade_losses
+    total_wins = solo_wins + flex_wins
+    total_losses = solo_losses + flex_losses
     db_execute(
         """
         INSERT INTO player_daily_stats (

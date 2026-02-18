@@ -220,6 +220,8 @@ class RiotApiClient:
 
             queue_id = match_info["info"].get("queueId", -1)
             bucket_name = get_mode_bucket(queue_id)
+            if bucket_name is None:
+                continue
             result = self.get_participant_win(match_info, puuid)
             if result is True:
                 mode_records[bucket_name]["wins"] += 1
@@ -233,7 +235,6 @@ class RiotApiClient:
             f"[mood] {riot_id}: matches={len(match_ids)} total={wins}W-{losses}L "
             f"solo={mode_records['solo_duo']['wins']}W-{mode_records['solo_duo']['losses']}L "
             f"flex={mode_records['flex']['wins']}W-{mode_records['flex']['losses']}L "
-            f"arcade={mode_records['arcade']['wins']}W-{mode_records['arcade']['losses']}L "
             f"elapsed={elapsed_ms}ms"
         )
         return mode_records
@@ -267,7 +268,7 @@ class RiotApiClient:
             end_ts = get_match_end_unix_seconds(match_info)
             end_local = datetime.fromtimestamp(end_ts, tz=timezone.utc).astimezone(self.report_timezone)
             queue_id = match_info["info"].get("queueId", -1)
-            bucket = get_mode_bucket(queue_id)
+            bucket = get_mode_bucket(queue_id) or "ignored"
             in_window = "yes" if end_ts >= window_start_unix else "no"
             lines.append(f"{match_id} | {queue_id} | {end_local:%d.%m.%Y %H:%M} | {bucket} | {in_window}")
             inspected += 1

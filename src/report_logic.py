@@ -8,7 +8,7 @@ def get_mode_bucket(queue_id):
         return "solo_duo"
     if queue_id == 440:
         return "flex"
-    return "arcade"
+    return None
 
 
 def create_mode_records():
@@ -20,8 +20,8 @@ def create_mode_records():
 
 
 def get_mode_totals(mode_records):
-    wins = sum(bucket["wins"] for bucket in mode_records.values())
-    losses = sum(bucket["losses"] for bucket in mode_records.values())
+    wins = mode_records["solo_duo"]["wins"] + mode_records["flex"]["wins"]
+    losses = mode_records["solo_duo"]["losses"] + mode_records["flex"]["losses"]
     return wins, losses
 
 

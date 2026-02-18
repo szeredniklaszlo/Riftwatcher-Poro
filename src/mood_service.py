@@ -143,12 +143,6 @@ class MoodService:
                 mode_records["flex"]["wins"],
                 mode_records["flex"]["losses"],
             )
-            self.append_mode_line_if_games(
-                report_lines,
-                "Arcade",
-                mode_records["arcade"]["wins"],
-                mode_records["arcade"]["losses"],
-            )
             report_lines.append(f"   Total: `{wins}W-{losses}L` - **{win_rate:.1f}%**")
             report_lines.append("")
 
@@ -238,8 +232,7 @@ class MoodService:
                         "flex": {"wins": row[3], "losses": row[4]},
                         "arcade": {"wins": row[5], "losses": row[6]},
                     }
-                    wins = row[7]
-                    losses = row[8]
+                    wins, losses = get_mode_totals(mode_records)
                     total = wins + losses
                     if total == 0:
                         continue
@@ -379,6 +372,8 @@ class MoodService:
                         continue
                     queue_id = match_info["info"].get("queueId", -1)
                     bucket_name = get_mode_bucket(queue_id)
+                    if bucket_name is None:
+                        continue
                     result = self.riot_client.get_participant_win(match_info, puuid)
                     if result is True:
                         mode_records[bucket_name]["wins"] += 1
