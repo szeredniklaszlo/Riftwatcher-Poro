@@ -8,8 +8,11 @@ MoodBot is a Discord bot that tracks League match mood for a tracked player list
 - `src/discord_bot.py` - Discord runtime and command handlers
 - `src/config.py` - environment/config loading
 - `src/db.py` - Postgres pool and persistence layer
+- `src/riot_api.py` - Riot API client (account, match list, match details, retries)
+- `src/mood_service.py` - report building, snapshot/cache flow, refresh orchestration
 - `src/report_logic.py` - pure ranking and formatting helpers
 - `src/constants.py` - command constants
+- `tests/test_report_logic.py` - unit tests for ranking/window logic helpers
 - `README.md` - project docs
 
 ## Features
@@ -21,9 +24,10 @@ MoodBot is a Discord bot that tracks League match mood for a tracked player list
   - Ranked Solo/Duo
   - Ranked Flex
   - Arcade
-- Ranking based on Wilson lower bound.
+- Ranking based on Wilson lower bound (`z=1.28`).
 - Displays `Gamer Score` (Wilson score x 100) per player.
 - Background refresh stores/reuses data in Postgres.
+- Background refresh updates the live scoreboard during long refresh cycles (every ~2 minutes and on detected content changes).
 - Persistent match cache and scoreboard message ID in Postgres.
 - Structured logging with optional JSON output and per-request IDs.
 - Automatic cleanup of cached match payloads (default retention: 31 days).
@@ -64,6 +68,8 @@ Optional:
 ```bash
 pytest -q
 ```
+
+Pytest cache provider is disabled in `pytest.ini` to avoid creating local `.pytest_cache` / `pytest-cache-files-*` artifacts.
 
 ## Railway
 
