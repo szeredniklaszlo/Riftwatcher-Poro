@@ -49,5 +49,8 @@ if REPORT_DAY_START_HOUR < 0 or REPORT_DAY_START_HOUR > 23:
     raise RuntimeError("REPORT_DAY_START_HOUR must be between 0 and 23.")
 DAILY_REFRESH_SECONDS = int(os.getenv("DAILY_REFRESH_SECONDS", "300"))
 MATCH_CACHE_RETENTION_DAYS = int(os.getenv("MATCH_CACHE_RETENTION_DAYS", "31"))
+raw_match_recap_channel_id = os.getenv("MATCH_RECAP_CHANNEL_ID", "").strip()
+MATCH_RECAP_CHANNEL_ID = int(raw_match_recap_channel_id) if raw_match_recap_channel_id else None
+MATCH_RECAP_POLL_SECONDS = int(os.getenv("MATCH_RECAP_POLL_SECONDS", "90"))
 DATABASE_URL = require_env("DATABASE_URL")
 DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))

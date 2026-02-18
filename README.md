@@ -27,6 +27,7 @@ MoodBot is a Discord bot that tracks League match mood for a tracked player list
 - Displays `Gamer Score` (Wilson score x 100) per player.
 - Background refresh stores/reuses data in Postgres.
 - Background refresh updates the live scoreboard during long refresh cycles (at least every ~2 minutes, and no more than every ~30s on content changes).
+- Optional new-match recap posts to a separate Discord channel and groups tracked players from the same game into one message.
 - Persistent match cache and scoreboard message ID in Postgres.
 - Structured logging with optional JSON output and per-request IDs.
 - Automatic cleanup of cached match payloads (default retention: 31 days).
@@ -62,6 +63,8 @@ Optional:
 - `MAX_IN_MEMORY_MATCH_CACHE` (default: `200`, caps in-process cached match payloads)
 - `REPORT_CACHE_SECONDS` (default: `120`)
 - `DAILY_REFRESH_SECONDS` (default: `300`)
+- `MATCH_RECAP_CHANNEL_ID` (optional, enables new-match recap posts when set)
+- `MATCH_RECAP_POLL_SECONDS` (default: `90`)
 - `DB_POOL_SIZE` (default: `5`)
 - `MATCH_CACHE_RETENTION_DAYS` (default: `31`)
 

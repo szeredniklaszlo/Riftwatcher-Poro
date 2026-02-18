@@ -13,6 +13,7 @@ from src import db as dbm
 from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, MOOD_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND
 from src.mood_service import MoodService
 from src.riot_api import RiotApiClient
+from src.report_logic import get_match_end_unix_seconds
 
 
 def log(message):
@@ -53,6 +54,8 @@ MAX_MATCH_IDS_SCAN = cfg.MAX_MATCH_IDS_SCAN
 MAX_IN_MEMORY_MATCH_CACHE = cfg.MAX_IN_MEMORY_MATCH_CACHE
 DAILY_REFRESH_SECONDS = cfg.DAILY_REFRESH_SECONDS
 MATCH_CACHE_RETENTION_DAYS = cfg.MATCH_CACHE_RETENTION_DAYS
+MATCH_RECAP_CHANNEL_ID = cfg.MATCH_RECAP_CHANNEL_ID
+MATCH_RECAP_POLL_SECONDS = cfg.MATCH_RECAP_POLL_SECONDS
 DB_ENABLED = dbm.DB_ENABLED
 
 normalize_riot_id = cfg.normalize_riot_id
@@ -97,6 +100,7 @@ MOOD_REQUEST_LOCK = asyncio.Lock()
 LAST_REPORT_MESSAGE = {"channel_id": None, "message_id": None}
 STARTUP_SCOREBOARD_INIT_DONE = False
 BACKGROUND_REFRESH_TASK = None
+BACKGROUND_RECAP_TASK = None
 
 
 async def send_riot_key_expired_alert():
@@ -270,6 +274,128 @@ async def daily_report(channel):
         log(f"[scheduler] No scoreboard change; skipped update for {report_message.id}.")
 
 
+def match_recap_state_key(riot_id):
+    return f"last_announced_match_id::{riot_id.casefold()}"
+
+
+def format_recap_queue_name(queue_id):
+    if queue_id == 420:
+        return "Ranked Solo/Duo"
+    if queue_id == 440:
+        return "Ranked Flex"
+    return f"Queue {queue_id}"
+
+
+def format_recap_player_line(riot_id, participant, match_duration_seconds):
+    lol_name = riot_id.split("#", 1)[0]
+    result = "W" if participant.get("win") else "L"
+    champion = participant.get("championName", "Unknown")
+    kills = int(participant.get("kills", 0) or 0)
+    deaths = int(participant.get("deaths", 0) or 0)
+    assists = int(participant.get("assists", 0) or 0)
+    cs = int(participant.get("totalMinionsKilled", 0) or 0) + int(participant.get("neutralMinionsKilled", 0) or 0)
+    minutes = max(1.0, float(match_duration_seconds) / 60.0)
+    cs_per_min = cs / minutes
+    player_damage = int(participant.get("totalDamageDealtToChampions", 0) or 0)
+    objective_damage = int(participant.get("damageDealtToObjectives", 0) or 0)
+    vision_score = int(participant.get("visionScore", 0) or 0)
+    return (
+        f"• **{lol_name}** `{result}` {champion} | "
+        f"K/D/A `{kills}/{deaths}/{assists}` | "
+        f"CS/m `{cs_per_min:.1f}` | "
+        f"Dmg `{player_damage:,}` | "
+        f"Obj `{objective_damage:,}` | "
+        f"Vis `{vision_score}`"
+    )
+
+
+async def background_match_recap_notifier():
+    if MATCH_RECAP_CHANNEL_ID is None:
+        return
+
+    while not client.is_closed():
+        token = REQUEST_ID_CONTEXT.set(create_request_id("recap"))
+        try:
+            channel = await resolve_channel(MATCH_RECAP_CHANNEL_ID)
+            if channel is None:
+                await asyncio.sleep(max(30, MATCH_RECAP_POLL_SECONDS))
+                continue
+
+            puuid_by_riot_id = {}
+            matches_to_report = set()
+            for riot_id in FRIENDS:
+                try:
+                    puuid = await riot_client.fetch_puuid(riot_id)
+                    puuid_by_riot_id[riot_id] = puuid
+                    recent_ids = await riot_client.fetch_recent_match_ids(puuid, count=20)
+                    if not recent_ids:
+                        continue
+
+                    state_key = match_recap_state_key(riot_id)
+                    last_announced = await asyncio.to_thread(db_get_state, state_key)
+                    latest_match_id = recent_ids[0]
+                    if not last_announced:
+                        await asyncio.to_thread(db_set_state, state_key, latest_match_id)
+                        continue
+
+                    new_match_ids = mood_service.get_new_match_ids(recent_ids, last_announced)
+                    if new_match_ids:
+                        matches_to_report.update(new_match_ids)
+                    await asyncio.to_thread(db_set_state, state_key, latest_match_id)
+                except requests.RequestException as exc:
+                    log(f"[recap] Failed while checking {riot_id}: {exc}")
+
+            if matches_to_report:
+                puuid_to_riot_id = {puuid: riot_id for riot_id, puuid in puuid_by_riot_id.items()}
+                match_entries = []
+                for match_id in matches_to_report:
+                    try:
+                        match_info = await riot_client.fetch_match_info(match_id)
+                    except requests.RequestException as exc:
+                        log(f"[recap] Failed fetching match {match_id}: {exc}")
+                        continue
+
+                    participants = match_info.get("info", {}).get("participants", [])
+                    tracked_participants = []
+                    for participant in participants:
+                        riot_id = puuid_to_riot_id.get(participant.get("puuid"))
+                        if riot_id:
+                            tracked_participants.append((riot_id, participant))
+                    if not tracked_participants:
+                        continue
+
+                    end_ts = get_match_end_unix_seconds(match_info)
+                    queue_id = int(match_info.get("info", {}).get("queueId", -1))
+                    duration_seconds = int(match_info.get("info", {}).get("gameDuration", 0) or 0)
+                    if duration_seconds > 10_000:
+                        duration_seconds = int(duration_seconds / 1000)
+                    match_entries.append((end_ts, match_id, queue_id, duration_seconds, tracked_participants))
+
+                match_entries.sort(key=lambda row: row[0])
+                for end_ts, match_id, queue_id, duration_seconds, tracked_participants in match_entries:
+                    queue_name = format_recap_queue_name(queue_id)
+                    end_local = datetime.fromtimestamp(end_ts, tz=REPORT_TIMEZONE)
+                    lines = [
+                        f"🎮 **New Match** `{queue_name}`",
+                        f"_Ended {end_local:%d.%m.%Y %H:%M}_",
+                        "",
+                    ]
+                    for riot_id, participant in sorted(tracked_participants, key=lambda row: row[0].casefold()):
+                        lines.append(format_recap_player_line(riot_id, participant, duration_seconds))
+                    lines.append("")
+                    lines.append(f"`{match_id}`")
+                    message = "\n".join(lines)
+                    if len(message) > 2000:
+                        message = message[:1950] + "\n..."
+                    await channel.send(message)
+                    log(f"[recap] Posted new match recap for {match_id} in channel {MATCH_RECAP_CHANNEL_ID}.")
+        except Exception as exc:
+            log(f"[recap] Unexpected error: {exc}")
+        finally:
+            REQUEST_ID_CONTEXT.reset(token)
+        await asyncio.sleep(max(30, MATCH_RECAP_POLL_SECONDS))
+
+
 async def background_daily_refresher():
     global LAST_CACHE_CLEANUP_AT
     if not DB_ENABLED:
@@ -351,7 +477,7 @@ async def background_daily_refresher():
 
 @client.event
 async def on_ready():
-    global BACKGROUND_REFRESH_TASK, STARTUP_SCOREBOARD_INIT_DONE
+    global BACKGROUND_REFRESH_TASK, BACKGROUND_RECAP_TASK, STARTUP_SCOREBOARD_INIT_DONE
     log(f"[startup] Logged in as {client.user} (id={client.user.id})")
     log(f"[startup] Use {TEST_COMMAND} in channel {CHANNEL_ID} to test sending.")
     log(f"[startup] Use {RIOT_TEST_COMMAND} in channel {CHANNEL_ID} to test Riot API access.")
@@ -373,10 +499,16 @@ async def on_ready():
     log(f"[startup] MAX_IN_MEMORY_MATCH_CACHE={MAX_IN_MEMORY_MATCH_CACHE}")
     log(f"[startup] REPORT_CACHE_SECONDS={REPORT_CACHE_SECONDS}")
     log(f"[startup] MATCH_CACHE_RETENTION_DAYS={MATCH_CACHE_RETENTION_DAYS}")
+    log(f"[startup] MATCH_RECAP_CHANNEL_ID={MATCH_RECAP_CHANNEL_ID if MATCH_RECAP_CHANNEL_ID else 'disabled'}")
+    log(f"[startup] MATCH_RECAP_POLL_SECONDS={MATCH_RECAP_POLL_SECONDS}")
+    if MATCH_RECAP_CHANNEL_ID and MATCH_RECAP_CHANNEL_ID == CHANNEL_ID:
+        log("[startup] Warning: MATCH_RECAP_CHANNEL_ID equals DISCORD_CHANNEL_ID.")
     if DB_ENABLED:
         log(f"[startup] DAILY_REFRESH_SECONDS={DAILY_REFRESH_SECONDS}")
         if BACKGROUND_REFRESH_TASK is None or BACKGROUND_REFRESH_TASK.done():
             BACKGROUND_REFRESH_TASK = client.loop.create_task(background_daily_refresher())
+        if MATCH_RECAP_CHANNEL_ID and (BACKGROUND_RECAP_TASK is None or BACKGROUND_RECAP_TASK.done()):
+            BACKGROUND_RECAP_TASK = client.loop.create_task(background_match_recap_notifier())
     if not STARTUP_SCOREBOARD_INIT_DONE:
         channel = await resolve_channel(CHANNEL_ID)
         if channel is not None:
