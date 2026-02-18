@@ -53,3 +53,48 @@ MoodBot is a Discord bot that tracks League match mood for a tracked player list
 - Add recency weighting so recent games matter more.
 - Use a composite score:
   - `GamerScore = 100 * (0.65 * p_bayes * conf + 0.25 * perf_norm + 0.10 * recency_norm)`
+
+## Commands
+
+- `!Mood`
+- `!Add Name#Tag`
+- `!DebugPlayer Name#Tag`
+- `!health`
+- `!test`
+- `!riottest`
+
+## Environment Variables
+
+Required:
+
+- `DISCORD_TOKEN`
+- `RIOT_API_KEY`
+- `DISCORD_CHANNEL_ID`
+- `DATABASE_URL`
+
+Optional:
+
+- `REPORT_TIMEZONE` (default: `UTC`, example: `Europe/Oslo`)
+- `LOG_RIOT_REQUESTS` (default: `false`)
+- `LOG_JSON` (default: `false`)
+- `MAX_TODAY_MATCH_DETAILS` (default: `20`)
+- `REPORT_DAY_START_HOUR` (default: `6`)
+- `MAX_MATCH_IDS_SCAN` (default: `300`)
+- `MAX_IN_MEMORY_MATCH_CACHE` (default: `200`)
+- `REPORT_CACHE_SECONDS` (default: `120`)
+- `DAILY_REFRESH_SECONDS` (default: `300`)
+- `MATCH_RECAP_CHANNEL_ID` (optional, enables recap posts)
+- `MATCH_RECAP_POLL_SECONDS` (default: `90`)
+- `DB_POOL_SIZE` (default: `5`)
+- `MATCH_CACHE_RETENTION_DAYS` (default: `31`)
+
+## Tests
+
+```bash
+pytest -q
+```
+
+## Railway
+
+- `Procfile`: `worker: python -m src.app`
+- `railway.json` start command: `python -m src.app`
