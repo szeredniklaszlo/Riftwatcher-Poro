@@ -1,5 +1,6 @@
 import asyncio
 import time
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -38,6 +39,8 @@ class RiotApiClient:
         log_riot_requests,
         report_timezone,
         max_today_match_details,
+        max_match_ids_scan,
+        max_in_memory_match_cache,
         db_get_puuid,
         db_upsert_player,
         db_get_match_info,
@@ -50,6 +53,8 @@ class RiotApiClient:
         self.log_riot_requests = log_riot_requests
         self.report_timezone = report_timezone
         self.max_today_match_details = max_today_match_details
+        self.max_match_ids_scan = max(1, max_match_ids_scan)
+        self.max_in_memory_match_cache = max(0, max_in_memory_match_cache)
         self.db_get_puuid = db_get_puuid
         self.db_upsert_player = db_upsert_player
         self.db_get_match_info = db_get_match_info
@@ -57,10 +62,18 @@ class RiotApiClient:
         self.db_set_last_seen_match_id = db_set_last_seen_match_id
         self.on_unauthorized = on_unauthorized
         self.puuid_cache = {}
-        self.match_info_cache = {}
+        self.match_info_cache = OrderedDict()
 
     def clear_match_cache(self):
         self.match_info_cache.clear()
+
+    def cache_match_info(self, match_id, match_info):
+        if self.max_in_memory_match_cache <= 0:
+            return
+        self.match_info_cache[match_id] = match_info
+        self.match_info_cache.move_to_end(match_id)
+        while len(self.match_info_cache) > self.max_in_memory_match_cache:
+            self.match_info_cache.popitem(last=False)
 
     def riot_get_json(self, url):
         headers = {"X-Riot-Token": self.riot_api_key}
@@ -133,6 +146,13 @@ class RiotApiClient:
                 break
 
             all_match_ids.extend(page_match_ids)
+            if len(all_match_ids) >= self.max_match_ids_scan:
+                all_match_ids = all_match_ids[: self.max_match_ids_scan]
+                self.log(
+                    f"[riot] Reached MAX_MATCH_IDS_SCAN={self.max_match_ids_scan}; "
+                    "stopping additional paging."
+                )
+                break
             if len(page_match_ids) < page_size:
                 break
             start += page_size
@@ -150,16 +170,17 @@ class RiotApiClient:
     async def fetch_match_info(self, match_id):
         cached = self.match_info_cache.get(match_id)
         if cached is not None:
+            self.match_info_cache.move_to_end(match_id)
             return cached
 
         persisted = await asyncio.to_thread(self.db_get_match_info, match_id)
         if persisted is not None:
-            self.match_info_cache[match_id] = persisted
+            self.cache_match_info(match_id, persisted)
             return persisted
 
         url = f"https://europe.api.riotgames.com/lol/match/v5/matches/{match_id}"
         match_info = await self.riot_get_json_async(url)
-        self.match_info_cache[match_id] = match_info
+        self.cache_match_info(match_id, match_info)
         await asyncio.to_thread(self.db_upsert_match_info, match_id, match_info)
         return match_info
 

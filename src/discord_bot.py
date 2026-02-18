@@ -34,6 +34,11 @@ def create_request_id(prefix):
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
+def report_signature(text):
+    lines = [line for line in text.splitlines() if not line.startswith("_Last updated:")]
+    return "\n".join(lines)
+
+
 TOKEN = cfg.TOKEN
 RIOT_API_KEY = cfg.RIOT_API_KEY
 CHANNEL_ID = cfg.CHANNEL_ID
@@ -43,6 +48,8 @@ LOG_RIOT_REQUESTS = cfg.LOG_RIOT_REQUESTS
 LOG_JSON = cfg.LOG_JSON
 REPORT_CACHE_SECONDS = cfg.REPORT_CACHE_SECONDS
 MAX_TODAY_MATCH_DETAILS = cfg.MAX_TODAY_MATCH_DETAILS
+MAX_MATCH_IDS_SCAN = cfg.MAX_MATCH_IDS_SCAN
+MAX_IN_MEMORY_MATCH_CACHE = cfg.MAX_IN_MEMORY_MATCH_CACHE
 DAILY_REFRESH_SECONDS = cfg.DAILY_REFRESH_SECONDS
 MATCH_CACHE_RETENTION_DAYS = cfg.MATCH_CACHE_RETENTION_DAYS
 DB_ENABLED = dbm.DB_ENABLED
@@ -140,6 +147,8 @@ riot_client = RiotApiClient(
     log_riot_requests=LOG_RIOT_REQUESTS,
     report_timezone=REPORT_TIMEZONE,
     max_today_match_details=MAX_TODAY_MATCH_DETAILS,
+    max_match_ids_scan=MAX_MATCH_IDS_SCAN,
+    max_in_memory_match_cache=MAX_IN_MEMORY_MATCH_CACHE,
     db_get_puuid=db_get_puuid,
     db_upsert_player=db_upsert_player,
     db_get_match_info=db_get_match_info,
@@ -263,11 +272,12 @@ async def background_daily_refresher():
         token = REQUEST_ID_CONTEXT.set(create_request_id("bg"))
         try:
             last_snapshot_push_at = 0.0
-            last_snapshot_text = None
+            last_snapshot_signature = None
             snapshot_push_interval = 120.0
+            changed_push_min_interval = 30.0
 
             async def push_snapshot_update(force=False):
-                nonlocal last_snapshot_push_at, last_snapshot_text
+                nonlocal last_snapshot_push_at, last_snapshot_signature
                 now_mono = time.monotonic()
 
                 channel_id = LAST_REPORT_MESSAGE["channel_id"]
@@ -285,8 +295,10 @@ async def background_daily_refresher():
                         bypass_cache=True,
                     )
                     interval_elapsed = (now_mono - last_snapshot_push_at) >= snapshot_push_interval
-                    changed = snapshot_text != last_snapshot_text
-                    should_push = force or changed or interval_elapsed
+                    signature = report_signature(snapshot_text)
+                    changed = signature != last_snapshot_signature
+                    changed_interval_elapsed = (now_mono - last_snapshot_push_at) >= changed_push_min_interval
+                    should_push = force or interval_elapsed or (changed and changed_interval_elapsed)
                     if not should_push:
                         return
 
@@ -300,7 +312,7 @@ async def background_daily_refresher():
                     else:
                         log(f"[refresh] Snapshot unchanged in Discord for message {message_id}.")
 
-                    last_snapshot_text = snapshot_text
+                    last_snapshot_signature = signature
                     last_snapshot_push_at = now_mono
                 except (discord.NotFound, discord.Forbidden) as exc:
                     log(f"[refresh] Could not edit last report message {message_id}: {exc}")
@@ -347,6 +359,8 @@ async def on_ready():
     log(f"[startup] LOG_RIOT_REQUESTS={LOG_RIOT_REQUESTS}")
     log(f"[startup] LOG_JSON={LOG_JSON}")
     log(f"[startup] MAX_TODAY_MATCH_DETAILS={MAX_TODAY_MATCH_DETAILS}")
+    log(f"[startup] MAX_MATCH_IDS_SCAN={MAX_MATCH_IDS_SCAN}")
+    log(f"[startup] MAX_IN_MEMORY_MATCH_CACHE={MAX_IN_MEMORY_MATCH_CACHE}")
     log(f"[startup] REPORT_CACHE_SECONDS={REPORT_CACHE_SECONDS}")
     log(f"[startup] MATCH_CACHE_RETENTION_DAYS={MATCH_CACHE_RETENTION_DAYS}")
     if DB_ENABLED:
