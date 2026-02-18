@@ -41,7 +41,6 @@ REPORT_TIMEZONE_NAME = cfg.REPORT_TIMEZONE_NAME
 REPORT_TIMEZONE = cfg.REPORT_TIMEZONE
 LOG_RIOT_REQUESTS = cfg.LOG_RIOT_REQUESTS
 LOG_JSON = cfg.LOG_JSON
-MAX_MATCHES_PER_PLAYER = cfg.MAX_MATCHES_PER_PLAYER
 REPORT_CACHE_SECONDS = cfg.REPORT_CACHE_SECONDS
 MAX_TODAY_MATCH_DETAILS = cfg.MAX_TODAY_MATCH_DETAILS
 DAILY_REFRESH_SECONDS = cfg.DAILY_REFRESH_SECONDS
@@ -140,7 +139,6 @@ riot_client = RiotApiClient(
     log=log,
     log_riot_requests=LOG_RIOT_REQUESTS,
     report_timezone=REPORT_TIMEZONE,
-    max_matches_per_player=MAX_MATCHES_PER_PLAYER,
     max_today_match_details=MAX_TODAY_MATCH_DETAILS,
     db_get_puuid=db_get_puuid,
     db_upsert_player=db_upsert_player,
@@ -293,7 +291,6 @@ async def on_ready():
     log(f"[startup] Report timezone: {REPORT_TIMEZONE_NAME}")
     log(f"[startup] LOG_RIOT_REQUESTS={LOG_RIOT_REQUESTS}")
     log(f"[startup] LOG_JSON={LOG_JSON}")
-    log(f"[startup] MAX_MATCHES_PER_PLAYER={MAX_MATCHES_PER_PLAYER}")
     log(f"[startup] MAX_TODAY_MATCH_DETAILS={MAX_TODAY_MATCH_DETAILS}")
     log(f"[startup] REPORT_CACHE_SECONDS={REPORT_CACHE_SECONDS}")
     log(f"[startup] MATCH_CACHE_RETENTION_DAYS={MATCH_CACHE_RETENTION_DAYS}")

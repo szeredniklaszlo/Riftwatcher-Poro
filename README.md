@@ -53,7 +53,6 @@ Optional:
 - `REPORT_TIMEZONE` (default: `UTC`, example: `Europe/Oslo`)
 - `LOG_RIOT_REQUESTS` (default: `false`)
 - `LOG_JSON` (default: `false`, emits JSON logs with request IDs)
-- `MAX_MATCHES_PER_PLAYER` (default: `25`)
 - `MAX_TODAY_MATCH_DETAILS` (default: `20`)
 - `REPORT_CACHE_SECONDS` (default: `120`)
 - `DAILY_REFRESH_SECONDS` (default: `300`)

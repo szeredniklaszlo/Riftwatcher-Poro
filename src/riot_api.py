@@ -37,7 +37,6 @@ class RiotApiClient:
         log,
         log_riot_requests,
         report_timezone,
-        max_matches_per_player,
         max_today_match_details,
         db_get_puuid,
         db_upsert_player,
@@ -50,7 +49,6 @@ class RiotApiClient:
         self.log = log
         self.log_riot_requests = log_riot_requests
         self.report_timezone = report_timezone
-        self.max_matches_per_player = max_matches_per_player
         self.max_today_match_details = max_today_match_details
         self.db_get_puuid = db_get_puuid
         self.db_upsert_player = db_upsert_player
@@ -121,12 +119,25 @@ class RiotApiClient:
         return puuid
 
     async def fetch_match_ids(self, puuid, start_time_unix):
-        count = max(1, min(self.max_matches_per_player, 100))
-        url = (
-            "https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/"
-            f"{puuid}/ids?startTime={start_time_unix}&count={count}"
-        )
-        return await self.riot_get_json_async(url)
+        page_size = 100
+        start = 0
+        all_match_ids = []
+
+        while True:
+            url = (
+                "https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/"
+                f"{puuid}/ids?startTime={start_time_unix}&start={start}&count={page_size}"
+            )
+            page_match_ids = await self.riot_get_json_async(url)
+            if not page_match_ids:
+                break
+
+            all_match_ids.extend(page_match_ids)
+            if len(page_match_ids) < page_size:
+                break
+            start += page_size
+
+        return all_match_ids
 
     async def fetch_recent_match_ids(self, puuid, count=20):
         safe_count = max(1, min(count, 100))

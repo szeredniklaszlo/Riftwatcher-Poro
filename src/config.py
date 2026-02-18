@@ -40,7 +40,6 @@ except Exception as exc:
 
 LOG_RIOT_REQUESTS = get_env_bool("LOG_RIOT_REQUESTS", False)
 LOG_JSON = get_env_bool("LOG_JSON", False)
-MAX_MATCHES_PER_PLAYER = int(os.getenv("MAX_MATCHES_PER_PLAYER", "25"))
 REPORT_CACHE_SECONDS = int(os.getenv("REPORT_CACHE_SECONDS", "120"))
 MAX_TODAY_MATCH_DETAILS = int(os.getenv("MAX_TODAY_MATCH_DETAILS", "20"))
 DAILY_REFRESH_SECONDS = int(os.getenv("DAILY_REFRESH_SECONDS", "300"))
