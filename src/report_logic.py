@@ -24,7 +24,7 @@ def get_mode_totals(mode_records):
     return wins, losses
 
 
-def wilson_lower_bound(wins, losses, z=1.96):
+def wilson_lower_bound(wins, losses, z=1.28):
     n = wins + losses
     if n <= 0:
         return 0.0

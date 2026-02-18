@@ -28,7 +28,7 @@ def test_rank_sort_key_orders_by_wilson_then_volume():
         ("Mid", {}, 5, 5, 50.0),
     ]
     ranked = sorted(rows, key=rank_sort_key)
-    assert [row[0] for row in ranked] == ["Solid", "Mid", "OneGame"]
+    assert [row[0] for row in ranked] == ["Solid", "OneGame", "Mid"]
 
 
 def test_format_mode_line_handles_empty_and_non_empty():
