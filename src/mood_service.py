@@ -64,13 +64,13 @@ class MoodService:
         return text
 
     def format_report_from_results(self, ranked_results, error_results, report_start):
-        report_lines = ["------ **LEAGUE MOOD (LAST 24 HOURS)** ------", ""]
+        report_lines = ["✨------ **LEAGUE MOOD (LAST 24 HOURS)** ------✨", ""]
         updated_at = datetime.now(tz=self.report_timezone).strftime("%d.%m.%Y %H:%M")
         if not ranked_results and not error_results:
             report_lines.append("Looks like everyone has a life today.")
             report_lines.append("We will keep you up to date of anyone crawls back into the hole.")
             report_lines.append("")
-            report_lines.append("----------------------------------------------")
+            report_lines.append("✨--------------------------------------------✨")
             report_lines.append(f"_Last updated: {updated_at}_")
             total_elapsed_ms = int((time.perf_counter() - report_start) * 1000)
             self.log(
@@ -84,24 +84,24 @@ class MoodService:
             wilson_score = wilson_lower_bound(wins, losses)
             gamer_score = wilson_score * 100
             if wins + losses > 0 and wilson_score <= 0:
-                mood_marker = "[down]"
+                mood_emoji = "💀"
             elif wilson_score >= 0.75:
-                mood_marker = "[great]"
+                mood_emoji = "😁"
             elif wilson_score >= 0.60:
-                mood_marker = "[good]"
+                mood_emoji = "😊"
             elif wilson_score >= 0.50:
-                mood_marker = "[ok]"
+                mood_emoji = "🙂"
             elif wilson_score >= 0.40:
-                mood_marker = "[flat]"
+                mood_emoji = "😐"
             elif wilson_score >= 0.30:
-                mood_marker = "[rough]"
+                mood_emoji = "😕"
             elif wilson_score >= 0.20:
-                mood_marker = "[bad]"
+                mood_emoji = "😞"
             else:
-                mood_marker = "[tilt]"
+                mood_emoji = "😭"
 
-            display_marker = "[top]" if index == 0 else mood_marker
-            report_lines.append(f"{display_marker}  **{lol_name}**  |  Gamer Score: **{gamer_score:.1f}**")
+            display_emoji = "⭐" if index == 0 else mood_emoji
+            report_lines.append(f"{display_emoji}  **{lol_name}**  |  Gamer Score: **{gamer_score:.1f}**")
             self.append_mode_line_if_games(
                 report_lines,
                 "Ranked Solo/Duo",
@@ -124,11 +124,11 @@ class MoodService:
             report_lines.append("")
 
         for lol_name, error_text in sorted(error_results, key=lambda row: row[0].lower()):
-            report_lines.append(f"[error]  **{lol_name}**")
+            report_lines.append(f"⚫  **{lol_name}**")
             report_lines.append(f"   Riot error: `{error_text}`")
             report_lines.append("")
 
-        report_lines.append("----------------------------------------------")
+        report_lines.append("✨--------------------------------------------✨")
         report_lines.append(f"_Last updated: {updated_at}_")
         total_elapsed_ms = int((time.perf_counter() - report_start) * 1000)
         self.log(
@@ -140,19 +140,19 @@ class MoodService:
         if len(report_text) <= 2000:
             return report_text
 
-        compact_lines = ["------ **LEAGUE MOOD (LAST 24 HOURS)** ------", ""]
+        compact_lines = ["✨------ **LEAGUE MOOD (LAST 24 HOURS)** ------✨", ""]
         for index, (lol_name, _mode_records, wins, losses, win_rate) in enumerate(ranked_results):
-            display_marker = "[top]" if index == 0 else "[ok]"
-            compact_lines.append(f"{display_marker}  **{lol_name}**  **`{wins}W-{losses}L` - {win_rate:.1f}%**")
+            display_emoji = "⭐" if index == 0 else "🙂"
+            compact_lines.append(f"{display_emoji}  **{lol_name}**  **`{wins}W-{losses}L` - {win_rate:.1f}%**")
 
         if error_results:
             compact_lines.append("")
             error_names = ", ".join(name for name, _ in error_results[:6])
             more = "" if len(error_results) <= 6 else f" (+{len(error_results) - 6} more)"
-            compact_lines.append(f"[error] Riot errors for {len(error_results)} players: {error_names}{more}")
+            compact_lines.append(f"⚫ Riot errors for {len(error_results)} players: {error_names}{more}")
 
         compact_lines.append("")
-        compact_lines.append("----------------------------------------------")
+        compact_lines.append("✨--------------------------------------------✨")
         compact_lines.append(f"_Last updated: {updated_at}_")
         compact_text = "\n".join(compact_lines)
         if len(compact_text) > 2000:
