@@ -1,4 +1,4 @@
-from src.mood_service import MoodService
+﻿from src.mood_service import MoodService
 
 
 def test_get_new_match_ids_when_last_seen_present():
@@ -29,6 +29,8 @@ def test_get_leader_badges_by_player_marks_category_leads():
                 "minutes_total": 30.0,
                 "objective_damage": 10000,
                 "player_damage": 20000,
+                "healing": 18000,
+                "damage_taken": 15000,
                 "kills": 10,
                 "deaths": 4,
                 "vision_score": 20,
@@ -45,6 +47,8 @@ def test_get_leader_badges_by_player_marks_category_leads():
                 "minutes_total": 20.0,
                 "objective_damage": 9000,
                 "player_damage": 22000,
+                "healing": 9000,
+                "damage_taken": 22000,
                 "kills": 8,
                 "deaths": 6,
                 "vision_score": 25,
@@ -55,7 +59,9 @@ def test_get_leader_badges_by_player_marks_category_leads():
     badges = MoodService.get_leader_badges_by_player(ranked_results)
     assert "🌾" in badges["Alpha"]  # tied CS/min lead
     assert "🏰" in badges["Alpha"]
+    assert "❤️" in badges["Alpha"]  # most healing
     assert "🗡️" in badges["Alpha"]
     assert "💥" in badges["Bravo"]
+    assert "🛡️" in badges["Bravo"]  # most damage taken
     assert "☠️" in badges["Bravo"]  # most deaths
     assert "👁️" in badges["Bravo"]

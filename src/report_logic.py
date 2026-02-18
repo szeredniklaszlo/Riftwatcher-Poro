@@ -25,6 +25,8 @@ def create_performance_totals():
         "minutes_total": 0.0,
         "objective_damage": 0,
         "player_damage": 0,
+        "healing": 0,
+        "damage_taken": 0,
         "kills": 0,
         "deaths": 0,
         "vision_score": 0,

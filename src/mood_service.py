@@ -21,6 +21,8 @@ class MoodService:
         ("cs_per_min", "\U0001F33E"),
         ("objective_damage", "\U0001F3F0"),
         ("player_damage", "\U0001F4A5"),
+        ("healing", "\u2764\uFE0F"),
+        ("damage_taken", "\U0001F6E1\uFE0F"),
         ("kills", "\U0001F5E1\uFE0F"),
         ("deaths", "\u2620\uFE0F"),
         ("vision_score", "\U0001F441\uFE0F"),
@@ -286,9 +288,11 @@ class MoodService:
                         "minutes_total": float(row[11] or 0.0),
                         "objective_damage": int(row[12] or 0),
                         "player_damage": int(row[13] or 0),
-                        "kills": int(row[14] or 0),
-                        "deaths": int(row[15] or 0),
-                        "vision_score": int(row[16] or 0),
+                        "healing": int(row[14] or 0),
+                        "damage_taken": int(row[15] or 0),
+                        "kills": int(row[16] or 0),
+                        "deaths": int(row[17] or 0),
+                        "vision_score": int(row[18] or 0),
                     }
                     wins, losses = get_mode_totals(mode_records)
                     total = wins + losses
@@ -444,9 +448,11 @@ class MoodService:
                     "minutes_total": float(row[7] or 0.0),
                     "objective_damage": int(row[8] or 0),
                     "player_damage": int(row[9] or 0),
-                    "kills": int(row[10] or 0),
-                    "deaths": int(row[11] or 0),
-                    "vision_score": int(row[12] or 0),
+                    "healing": int(row[10] or 0),
+                    "damage_taken": int(row[11] or 0),
+                    "kills": int(row[12] or 0),
+                    "deaths": int(row[13] or 0),
+                    "vision_score": int(row[14] or 0),
                 }
                 player_changed = False
                 for match_id in reversed(new_match_ids):
@@ -479,6 +485,8 @@ class MoodService:
                     performance_totals["cs_total"] += int(participant.get("neutralMinionsKilled", 0) or 0)
                     performance_totals["objective_damage"] += int(participant.get("damageDealtToObjectives", 0) or 0)
                     performance_totals["player_damage"] += int(participant.get("totalDamageDealtToChampions", 0) or 0)
+                    performance_totals["healing"] += int(participant.get("totalHeal", 0) or 0)
+                    performance_totals["damage_taken"] += int(participant.get("totalDamageTaken", 0) or 0)
                     performance_totals["kills"] += int(participant.get("kills", 0) or 0)
                     performance_totals["deaths"] += int(participant.get("deaths", 0) or 0)
                     performance_totals["vision_score"] += int(participant.get("visionScore", 0) or 0)

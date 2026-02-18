@@ -122,6 +122,8 @@ def init_db():
             minutes_total DOUBLE PRECISION NOT NULL DEFAULT 0,
             objective_damage BIGINT NOT NULL DEFAULT 0,
             player_damage BIGINT NOT NULL DEFAULT 0,
+            healing BIGINT NOT NULL DEFAULT 0,
+            damage_taken BIGINT NOT NULL DEFAULT 0,
             kills INTEGER NOT NULL DEFAULT 0,
             deaths INTEGER NOT NULL DEFAULT 0,
             vision_score INTEGER NOT NULL DEFAULT 0,
@@ -134,6 +136,8 @@ def init_db():
     db_execute("ALTER TABLE player_daily_stats ADD COLUMN IF NOT EXISTS minutes_total DOUBLE PRECISION NOT NULL DEFAULT 0;")
     db_execute("ALTER TABLE player_daily_stats ADD COLUMN IF NOT EXISTS objective_damage BIGINT NOT NULL DEFAULT 0;")
     db_execute("ALTER TABLE player_daily_stats ADD COLUMN IF NOT EXISTS player_damage BIGINT NOT NULL DEFAULT 0;")
+    db_execute("ALTER TABLE player_daily_stats ADD COLUMN IF NOT EXISTS healing BIGINT NOT NULL DEFAULT 0;")
+    db_execute("ALTER TABLE player_daily_stats ADD COLUMN IF NOT EXISTS damage_taken BIGINT NOT NULL DEFAULT 0;")
     db_execute("ALTER TABLE player_daily_stats ADD COLUMN IF NOT EXISTS kills INTEGER NOT NULL DEFAULT 0;")
     db_execute("ALTER TABLE player_daily_stats ADD COLUMN IF NOT EXISTS deaths INTEGER NOT NULL DEFAULT 0;")
     db_execute("ALTER TABLE player_daily_stats ADD COLUMN IF NOT EXISTS vision_score INTEGER NOT NULL DEFAULT 0;")
@@ -299,6 +303,8 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=No
     minutes_total = float(stats.get("minutes_total", 0.0) or 0.0)
     objective_damage = int(stats.get("objective_damage", 0) or 0)
     player_damage = int(stats.get("player_damage", 0) or 0)
+    healing = int(stats.get("healing", 0) or 0)
+    damage_taken = int(stats.get("damage_taken", 0) or 0)
     kills = int(stats.get("kills", 0) or 0)
     deaths = int(stats.get("deaths", 0) or 0)
     vision_score = int(stats.get("vision_score", 0) or 0)
@@ -311,13 +317,13 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=No
             arcade_wins, arcade_losses,
             total_wins, total_losses,
             cs_total, minutes_total,
-            objective_damage, player_damage,
+            objective_damage, player_damage, healing, damage_taken,
             kills, deaths, vision_score,
             updated_at
         )
         VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, NOW()
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
         )
         ON CONFLICT (day_date, riot_id)
         DO UPDATE SET
@@ -333,6 +339,8 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=No
             minutes_total = EXCLUDED.minutes_total,
             objective_damage = EXCLUDED.objective_damage,
             player_damage = EXCLUDED.player_damage,
+            healing = EXCLUDED.healing,
+            damage_taken = EXCLUDED.damage_taken,
             kills = EXCLUDED.kills,
             deaths = EXCLUDED.deaths,
             vision_score = EXCLUDED.vision_score,
@@ -353,6 +361,8 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=No
             minutes_total,
             objective_damage,
             player_damage,
+            healing,
+            damage_taken,
             kills,
             deaths,
             vision_score,
@@ -366,7 +376,7 @@ def db_load_latest_stats(day_date):
         SELECT DISTINCT ON (lower(riot_id))
             riot_id, solo_wins, solo_losses, flex_wins, flex_losses,
             arcade_wins, arcade_losses, total_wins, total_losses, updated_at,
-            cs_total, minutes_total, objective_damage, player_damage, kills, deaths, vision_score
+            cs_total, minutes_total, objective_damage, player_damage, healing, damage_taken, kills, deaths, vision_score
         FROM player_daily_stats
         WHERE day_date = %s
         ORDER BY lower(riot_id), updated_at DESC;
@@ -388,6 +398,8 @@ def db_get_daily_stats_for_player(day_date, riot_id):
             minutes_total,
             objective_damage,
             player_damage,
+            healing,
+            damage_taken,
             kills,
             deaths,
             vision_score

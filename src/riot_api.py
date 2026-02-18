@@ -248,6 +248,8 @@ class RiotApiClient:
             performance_totals["cs_total"] += int(participant.get("neutralMinionsKilled", 0) or 0)
             performance_totals["objective_damage"] += int(participant.get("damageDealtToObjectives", 0) or 0)
             performance_totals["player_damage"] += int(participant.get("totalDamageDealtToChampions", 0) or 0)
+            performance_totals["healing"] += int(participant.get("totalHeal", 0) or 0)
+            performance_totals["damage_taken"] += int(participant.get("totalDamageTaken", 0) or 0)
             performance_totals["kills"] += int(participant.get("kills", 0) or 0)
             performance_totals["deaths"] += int(participant.get("deaths", 0) or 0)
             performance_totals["vision_score"] += int(participant.get("visionScore", 0) or 0)
