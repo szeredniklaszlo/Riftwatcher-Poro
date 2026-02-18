@@ -1,8 +1,9 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
-    "startCommand": "python Bot.py",
+    "startCommand": "python -m src.app",
     "restartPolicyType": "ALWAYS",
     "restartPolicyMaxRetries": 10
   }
 }
+

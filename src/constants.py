@@ -1,0 +1,5 @@
+TEST_COMMAND = "!test"
+RIOT_TEST_COMMAND = "!riottest"
+MOOD_COMMAND = "!Mood"
+ADD_COMMAND = "!Add"
+DEBUG_PLAYER_COMMAND = "!DebugPlayer"

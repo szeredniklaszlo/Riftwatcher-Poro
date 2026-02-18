@@ -42,7 +42,7 @@ pip install -r requirements.txt
 set DISCORD_TOKEN=your_token
 set RIOT_API_KEY=your_riot_key
 set DISCORD_CHANNEL_ID=your_channel_id
-python Bot.py
+python -m src.app
 ```
 
 ## How The Report Is Calculated
@@ -88,7 +88,7 @@ This repository includes:
 
 - `.gitlab-ci.yml` - deploy job for Railway on pushes to your default branch.
 - `railway.json` - Railway start command and restart policy.
-- `Procfile` - worker process declaration (`python Bot.py`).
+- `Procfile` - worker process declaration (`python -m src.app`).
 
 Set these CI/CD variables in GitLab (`Settings -> CI/CD -> Variables`):
 
@@ -105,3 +105,4 @@ Set these runtime variables in Railway service settings:
 - `PLAYERS_FILE` (optional)
 - `REPORT_TIMEZONE` (optional)
 - `DATABASE_URL` (recommended for persistence across redeploys)
+
