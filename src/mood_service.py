@@ -9,7 +9,8 @@ from src.report_logic import (
     format_mode_line,
     get_mode_bucket,
     get_mode_totals,
-    is_match_in_last_24h,
+    get_report_cycle_key,
+    is_match_in_report_cycle,
     rank_sort_key,
     wilson_lower_bound,
 )
@@ -24,6 +25,7 @@ class MoodService:
         friends,
         riot_client,
         report_timezone,
+        report_day_start_hour,
         report_cache_seconds,
         daily_refresh_seconds,
         db_enabled,
@@ -38,6 +40,7 @@ class MoodService:
         self.friends = friends
         self.riot_client = riot_client
         self.report_timezone = report_timezone
+        self.report_day_start_hour = max(0, min(23, int(report_day_start_hour)))
         self.report_cache_seconds = report_cache_seconds
         self.daily_refresh_seconds = daily_refresh_seconds
         self.db_enabled = db_enabled
@@ -83,8 +86,14 @@ class MoodService:
             new_ids.append(match_id)
         return new_ids
 
+    def get_cycle_key(self):
+        return get_report_cycle_key(
+            self.report_timezone,
+            day_start_hour=self.report_day_start_hour,
+        )
+
     def format_report_from_results(self, ranked_results, error_results, report_start):
-        report_lines = ["✨------ **LEAGUE MOOD (LAST 24 HOURS)** ------✨", ""]
+        report_lines = ["✨------ **LEAGUE MOOD (DAILY)** ------✨", ""]
         updated_at = datetime.now(tz=self.report_timezone).strftime("%d.%m.%Y %H:%M")
         if not ranked_results and not error_results:
             report_lines.append("Looks like everyone has a life today.")
@@ -160,7 +169,7 @@ class MoodService:
         if len(report_text) <= 2000:
             return report_text
 
-        compact_lines = ["✨------ **LEAGUE MOOD (LAST 24 HOURS)** ------✨", ""]
+        compact_lines = ["✨------ **LEAGUE MOOD (DAILY)** ------✨", ""]
         for index, (lol_name, _mode_records, wins, losses, win_rate) in enumerate(ranked_results):
             display_emoji = "⭐" if index == 0 else "🙂"
             compact_lines.append(f"{display_emoji}  **{lol_name}**  **`{wins}W-{losses}L` - {win_rate:.1f}%**")
@@ -180,13 +189,13 @@ class MoodService:
         return compact_text
 
     async def build_today_win_rate_report(self, progress_callback=None, prefer_snapshot=False, bypass_cache=False):
-        today_key = datetime.now(tz=self.report_timezone).date().isoformat()
+        cycle_key = self.get_cycle_key()
         now_monotonic = time.monotonic()
         if (
             not bypass_cache
             and
             self.report_cache["text"] is not None
-            and self.report_cache["day"] == today_key
+            and self.report_cache["day"] == cycle_key
             and now_monotonic < self.report_cache["expires_at"]
         ):
             self.log("[mood] Returning cached report.")
@@ -197,7 +206,7 @@ class MoodService:
         error_results = []
 
         if self.db_enabled:
-            stored_rows = await asyncio.to_thread(self.db_load_latest_stats, today_key)
+            stored_rows = await asyncio.to_thread(self.db_load_latest_stats, cycle_key)
             if stored_rows:
                 if not prefer_snapshot:
                     latest_updated_at = None
@@ -246,14 +255,14 @@ class MoodService:
                         report_text = self.format_report_from_results(ranked_results, error_results, report_start)
                         if not bypass_cache:
                             self.report_cache["text"] = report_text
-                            self.report_cache["day"] = today_key
+                            self.report_cache["day"] = cycle_key
                             self.report_cache["expires_at"] = time.monotonic() + max(0, self.report_cache_seconds)
                         return report_text
             elif prefer_snapshot:
                 report_text = self.format_report_from_results(ranked_results, error_results, report_start)
                 if not bypass_cache:
                     self.report_cache["text"] = report_text
-                    self.report_cache["day"] = today_key
+                    self.report_cache["day"] = cycle_key
                     self.report_cache["expires_at"] = time.monotonic() + max(0, self.report_cache_seconds)
                 return report_text
 
@@ -276,8 +285,7 @@ class MoodService:
 
             wins, losses = get_mode_totals(mode_records)
             total = wins + losses
-            today_key = datetime.now(tz=self.report_timezone).date().isoformat()
-            await asyncio.to_thread(self.db_upsert_daily_stats, today_key, riot_id, mode_records)
+            await asyncio.to_thread(self.db_upsert_daily_stats, cycle_key, riot_id, mode_records)
             if total == 0:
                 processed_players += 1
                 if progress_callback is not None:
@@ -293,7 +301,7 @@ class MoodService:
         ranked_results.sort(key=rank_sort_key)
         report_text = self.format_report_from_results(ranked_results, error_results, report_start)
         self.report_cache["text"] = report_text
-        self.report_cache["day"] = today_key
+        self.report_cache["day"] = cycle_key
         self.report_cache["expires_at"] = time.monotonic() + max(0, self.report_cache_seconds)
         return report_text
 
@@ -302,13 +310,13 @@ class MoodService:
             return
         self.log("[refresh] Starting daily stats refresh.")
         self.riot_client.clear_match_cache()
+        cycle_key = self.get_cycle_key()
         total_players = len(self.friends)
         processed_players = 0
         for riot_id in self.friends:
             try:
                 mode_records = await self.riot_client.get_today_mode_records(riot_id)
-                today_key = datetime.now(tz=self.report_timezone).date().isoformat()
-                await asyncio.to_thread(self.db_upsert_daily_stats, today_key, riot_id, mode_records)
+                await asyncio.to_thread(self.db_upsert_daily_stats, cycle_key, riot_id, mode_records)
             except requests.RequestException as exc:
                 self.log(f"[refresh] Failed for {riot_id}: {exc}")
             finally:
@@ -322,6 +330,7 @@ class MoodService:
         if not self.db_enabled:
             return
         self.log(f"[refresh] Running on-demand recent refresh (count={recent_count})")
+        cycle_key = self.get_cycle_key()
         changed_any = False
         candidates = []
 
@@ -342,15 +351,14 @@ class MoodService:
 
         for riot_id, puuid, latest_match_id, new_match_ids in candidates:
             try:
-                today_key = datetime.now(tz=self.report_timezone).date().isoformat()
-                row = await asyncio.to_thread(self.db_get_daily_stats_for_player, today_key, riot_id)
+                row = await asyncio.to_thread(self.db_get_daily_stats_for_player, cycle_key, riot_id)
                 if row is None:
                     self.log(
                         f"[refresh] No baseline daily stats for {riot_id}; "
                         "running full player refresh fallback."
                     )
                     mode_records = await self.riot_client.get_today_mode_records(riot_id)
-                    await asyncio.to_thread(self.db_upsert_daily_stats, today_key, riot_id, mode_records)
+                    await asyncio.to_thread(self.db_upsert_daily_stats, cycle_key, riot_id, mode_records)
                     await asyncio.to_thread(self.db_set_last_seen_match_id, riot_id, latest_match_id)
                     changed_any = True
                     continue
@@ -363,7 +371,11 @@ class MoodService:
                 player_changed = False
                 for match_id in reversed(new_match_ids):
                     match_info = await self.riot_client.fetch_match_info(match_id)
-                    if not is_match_in_last_24h(match_info):
+                    if not is_match_in_report_cycle(
+                        match_info,
+                        self.report_timezone,
+                        day_start_hour=self.report_day_start_hour,
+                    ):
                         continue
                     queue_id = match_info["info"].get("queueId", -1)
                     bucket_name = get_mode_bucket(queue_id)
@@ -376,7 +388,7 @@ class MoodService:
                         player_changed = True
 
                 if player_changed:
-                    await asyncio.to_thread(self.db_upsert_daily_stats, today_key, riot_id, mode_records)
+                    await asyncio.to_thread(self.db_upsert_daily_stats, cycle_key, riot_id, mode_records)
                     changed_any = True
 
                 await asyncio.to_thread(self.db_set_last_seen_match_id, riot_id, latest_match_id)

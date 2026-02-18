@@ -1,7 +1,7 @@
 import asyncio
 import time
 from collections import OrderedDict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import requests
@@ -11,7 +11,8 @@ from src.report_logic import (
     get_match_end_unix_seconds,
     get_mode_bucket,
     get_mode_totals,
-    is_match_in_last_24h,
+    get_report_cycle_start_unix_seconds,
+    is_match_in_report_cycle,
 )
 
 
@@ -25,11 +26,6 @@ def get_lol_name(riot_id):
     return game_name
 
 
-def get_last_24h_start_unix_seconds():
-    now_utc = datetime.now(tz=timezone.utc)
-    return int((now_utc - timedelta(hours=24)).timestamp())
-
-
 class RiotApiClient:
     def __init__(
         self,
@@ -38,6 +34,7 @@ class RiotApiClient:
         log,
         log_riot_requests,
         report_timezone,
+        report_day_start_hour,
         max_today_match_details,
         max_match_ids_scan,
         max_in_memory_match_cache,
@@ -52,6 +49,7 @@ class RiotApiClient:
         self.log = log
         self.log_riot_requests = log_riot_requests
         self.report_timezone = report_timezone
+        self.report_day_start_hour = max(0, min(23, int(report_day_start_hour)))
         self.max_today_match_details = max_today_match_details
         self.max_match_ids_scan = max(1, max_match_ids_scan)
         self.max_in_memory_match_cache = max(0, max_in_memory_match_cache)
@@ -194,7 +192,10 @@ class RiotApiClient:
     async def get_today_mode_records(self, riot_id):
         player_start = time.perf_counter()
         puuid = await self.fetch_puuid(riot_id)
-        start_time_unix = get_last_24h_start_unix_seconds()
+        start_time_unix = get_report_cycle_start_unix_seconds(
+            self.report_timezone,
+            day_start_hour=self.report_day_start_hour,
+        )
         match_ids = await self.fetch_match_ids(puuid, start_time_unix)
         if match_ids:
             await asyncio.to_thread(self.db_set_last_seen_match_id, riot_id, match_ids[0])
@@ -203,7 +204,11 @@ class RiotApiClient:
         today_details_processed = 0
         for match_id in match_ids:
             match_info = await self.fetch_match_info(match_id)
-            if not is_match_in_last_24h(match_info):
+            if not is_match_in_report_cycle(
+                match_info,
+                self.report_timezone,
+                day_start_hour=self.report_day_start_hour,
+            ):
                 continue
 
             if today_details_processed >= max(1, self.max_today_match_details):
@@ -235,19 +240,26 @@ class RiotApiClient:
 
     async def run_riot_connectivity_test(self, riot_id):
         puuid = await self.fetch_puuid(riot_id)
-        start_time_unix = get_last_24h_start_unix_seconds()
+        start_time_unix = get_report_cycle_start_unix_seconds(
+            self.report_timezone,
+            day_start_hour=self.report_day_start_hour,
+        )
         match_ids = await self.fetch_match_ids(puuid, start_time_unix)
         return riot_id, puuid, len(match_ids)
 
     async def build_debug_player_report(self, riot_id, report_timezone_name, normalize_riot_id):
-        window_start_unix = get_last_24h_start_unix_seconds()
+        window_start_unix = get_report_cycle_start_unix_seconds(
+            self.report_timezone,
+            day_start_hour=self.report_day_start_hour,
+        )
         normalized = normalize_riot_id(riot_id)
         puuid = await self.fetch_puuid(normalized)
         recent_ids = await self.fetch_recent_match_ids(puuid, count=20)
+        window_label = f"since {self.report_day_start_hour:02d}:00"
         lines = [
-            f"Player debug (timezone={report_timezone_name}, window=last 24h):",
+            f"Player debug (timezone={report_timezone_name}, window={window_label}):",
             normalized,
-            "match_id | queue | end_time | bucket | in_last_24h",
+            "match_id | queue | end_time | bucket | in_window",
         ]
         inspected = 0
         for match_id in recent_ids:

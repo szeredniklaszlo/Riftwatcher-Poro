@@ -18,7 +18,7 @@ MoodBot is a Discord bot that tracks League match mood for a tracked player list
 ## Features
 
 - `!Mood` posts/updates a single scoreboard message.
-- Rolling **last 24 hours** window (not calendar day).
+- Rolling daily window starting at **06:00** in `REPORT_TIMEZONE`.
 - Per-player breakdown:
   - Total
   - Ranked Solo/Duo
@@ -58,7 +58,8 @@ Optional:
 - `LOG_RIOT_REQUESTS` (default: `false`)
 - `LOG_JSON` (default: `false`, emits JSON logs with request IDs)
 - `MAX_TODAY_MATCH_DETAILS` (default: `20`)
-- `MAX_MATCH_IDS_SCAN` (default: `300`, caps per-player match ID paging in the 24h window)
+- `REPORT_DAY_START_HOUR` (default: `6`, daily report window start hour in `REPORT_TIMEZONE`)
+- `MAX_MATCH_IDS_SCAN` (default: `300`, caps per-player match ID paging in the active report window)
 - `MAX_IN_MEMORY_MATCH_CACHE` (default: `200`, caps in-process cached match payloads)
 - `REPORT_CACHE_SECONDS` (default: `120`)
 - `DAILY_REFRESH_SECONDS` (default: `300`)

@@ -1,7 +1,12 @@
+from datetime import datetime, timezone
+
 from src.report_logic import (
     format_mode_line,
+    get_report_cycle_key,
+    get_report_cycle_start_unix_seconds,
     get_match_end_unix_seconds,
     get_mode_bucket,
+    is_match_in_report_cycle,
     is_match_in_last_24h,
     rank_sort_key,
     wilson_lower_bound,
@@ -48,3 +53,28 @@ def test_is_match_in_last_24h_uses_game_end_timestamp():
 
     assert is_match_in_last_24h(recent_match, now_ts=now_ts)
     assert not is_match_in_last_24h(old_match, now_ts=now_ts)
+
+
+def test_report_cycle_start_uses_previous_day_before_cutoff():
+    tz = timezone.utc
+    now_utc = datetime(2026, 2, 18, 5, 30, tzinfo=timezone.utc)
+    start_ts = get_report_cycle_start_unix_seconds(tz, day_start_hour=6, now_utc=now_utc)
+    expected = int(datetime(2026, 2, 17, 6, 0, tzinfo=timezone.utc).timestamp())
+    assert start_ts == expected
+
+
+def test_report_cycle_key_changes_at_cutoff():
+    tz = timezone.utc
+    before = datetime(2026, 2, 18, 5, 59, tzinfo=timezone.utc)
+    after = datetime(2026, 2, 18, 6, 0, tzinfo=timezone.utc)
+    assert get_report_cycle_key(tz, day_start_hour=6, now_utc=before) == "2026-02-17"
+    assert get_report_cycle_key(tz, day_start_hour=6, now_utc=after) == "2026-02-18"
+
+
+def test_is_match_in_report_cycle_uses_cutoff_window():
+    tz = timezone.utc
+    now_utc = datetime(2026, 2, 18, 10, 0, tzinfo=timezone.utc)
+    in_cycle = {"info": {"gameEndTimestamp": int(datetime(2026, 2, 18, 6, 0, tzinfo=timezone.utc).timestamp() * 1000)}}
+    old = {"info": {"gameEndTimestamp": int(datetime(2026, 2, 18, 5, 59, tzinfo=timezone.utc).timestamp() * 1000)}}
+    assert is_match_in_report_cycle(in_cycle, tz, day_start_hour=6, now_utc=now_utc)
+    assert not is_match_in_report_cycle(old, tz, day_start_hour=6, now_utc=now_utc)

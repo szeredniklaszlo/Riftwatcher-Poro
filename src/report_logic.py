@@ -1,5 +1,6 @@
 import math
 import time
+from datetime import datetime, timedelta, timezone
 
 
 def get_mode_bucket(queue_id):
@@ -58,6 +59,34 @@ def get_match_end_unix_seconds(match_info):
         duration_s = match_info["info"].get("gameDuration", 0)
         end_ms = creation_ms + (duration_s * 1000)
     return int(end_ms / 1000)
+
+
+def get_report_cycle_start_unix_seconds(report_timezone, day_start_hour=6, now_utc=None):
+    safe_day_start_hour = max(0, min(23, int(day_start_hour)))
+    if now_utc is None:
+        now_utc = datetime.now(tz=timezone.utc)
+    now_local = now_utc.astimezone(report_timezone)
+    cycle_start_local = now_local.replace(hour=safe_day_start_hour, minute=0, second=0, microsecond=0)
+    if now_local < cycle_start_local:
+        cycle_start_local -= timedelta(days=1)
+    return int(cycle_start_local.astimezone(timezone.utc).timestamp())
+
+
+def get_report_cycle_key(report_timezone, day_start_hour=6, now_utc=None):
+    safe_day_start_hour = max(0, min(23, int(day_start_hour)))
+    if now_utc is None:
+        now_utc = datetime.now(tz=timezone.utc)
+    now_local = now_utc.astimezone(report_timezone)
+    cycle_start_local = now_local.replace(hour=safe_day_start_hour, minute=0, second=0, microsecond=0)
+    if now_local < cycle_start_local:
+        cycle_start_local -= timedelta(days=1)
+    return cycle_start_local.date().isoformat()
+
+
+def is_match_in_report_cycle(match_info, report_timezone, day_start_hour=6, now_utc=None):
+    window_start = get_report_cycle_start_unix_seconds(report_timezone, day_start_hour=day_start_hour, now_utc=now_utc)
+    end_ts = get_match_end_unix_seconds(match_info)
+    return end_ts >= window_start
 
 
 def is_match_in_last_24h(match_info, now_ts=None):

@@ -47,6 +47,7 @@ REPORT_TIMEZONE = cfg.REPORT_TIMEZONE
 LOG_RIOT_REQUESTS = cfg.LOG_RIOT_REQUESTS
 LOG_JSON = cfg.LOG_JSON
 REPORT_CACHE_SECONDS = cfg.REPORT_CACHE_SECONDS
+REPORT_DAY_START_HOUR = cfg.REPORT_DAY_START_HOUR
 MAX_TODAY_MATCH_DETAILS = cfg.MAX_TODAY_MATCH_DETAILS
 MAX_MATCH_IDS_SCAN = cfg.MAX_MATCH_IDS_SCAN
 MAX_IN_MEMORY_MATCH_CACHE = cfg.MAX_IN_MEMORY_MATCH_CACHE
@@ -147,6 +148,7 @@ riot_client = RiotApiClient(
     log=log,
     log_riot_requests=LOG_RIOT_REQUESTS,
     report_timezone=REPORT_TIMEZONE,
+    report_day_start_hour=REPORT_DAY_START_HOUR,
     max_today_match_details=MAX_TODAY_MATCH_DETAILS,
     max_match_ids_scan=MAX_MATCH_IDS_SCAN,
     max_in_memory_match_cache=MAX_IN_MEMORY_MATCH_CACHE,
@@ -163,6 +165,7 @@ mood_service = MoodService(
     friends=FRIENDS,
     riot_client=riot_client,
     report_timezone=REPORT_TIMEZONE,
+    report_day_start_hour=REPORT_DAY_START_HOUR,
     report_cache_seconds=REPORT_CACHE_SECONDS,
     daily_refresh_seconds=DAILY_REFRESH_SECONDS,
     db_enabled=DB_ENABLED,
@@ -352,7 +355,10 @@ async def on_ready():
     log(f"[startup] Logged in as {client.user} (id={client.user.id})")
     log(f"[startup] Use {TEST_COMMAND} in channel {CHANNEL_ID} to test sending.")
     log(f"[startup] Use {RIOT_TEST_COMMAND} in channel {CHANNEL_ID} to test Riot API access.")
-    log(f"[startup] Use {MOOD_COMMAND} in channel {CHANNEL_ID} for last 24h win rates.")
+    log(
+        f"[startup] Use {MOOD_COMMAND} in channel {CHANNEL_ID} for results "
+        f"since {REPORT_DAY_START_HOUR:02d}:00."
+    )
     log(f"[startup] Use {ADD_COMMAND} <Name#Tag> to add a player at runtime.")
     log(f"[startup] Use {DEBUG_PLAYER_COMMAND} <Name#Tag> to inspect queue bucket mapping.")
     log(f"[startup] Use {HEALTH_COMMAND} in channel {CHANNEL_ID} for health status.")
@@ -362,6 +368,7 @@ async def on_ready():
     log(f"[startup] LOG_RIOT_REQUESTS={LOG_RIOT_REQUESTS}")
     log(f"[startup] LOG_JSON={LOG_JSON}")
     log(f"[startup] MAX_TODAY_MATCH_DETAILS={MAX_TODAY_MATCH_DETAILS}")
+    log(f"[startup] REPORT_DAY_START_HOUR={REPORT_DAY_START_HOUR}")
     log(f"[startup] MAX_MATCH_IDS_SCAN={MAX_MATCH_IDS_SCAN}")
     log(f"[startup] MAX_IN_MEMORY_MATCH_CACHE={MAX_IN_MEMORY_MATCH_CACHE}")
     log(f"[startup] REPORT_CACHE_SECONDS={REPORT_CACHE_SECONDS}")
@@ -462,7 +469,9 @@ async def on_message(message):
                 return
 
             async with MOOD_REQUEST_LOCK:
-                loading_text = "⏳ Gathering last 24h match results from Riot..."
+                loading_text = (
+                    f"⏳ Gathering match results since {REPORT_DAY_START_HOUR:02d}:00 from Riot..."
+                )
                 status_message = await get_or_create_report_message(message.channel, loading_text)
                 if status_message.content != loading_text:
                     await status_message.edit(content=loading_text)
@@ -488,13 +497,19 @@ async def on_message(message):
                     else:
                         async def progress(done, total, last_name):
                             await status_message.edit(
-                                content=f"⏳ Gathering last 24h match results from Riot... ({done}/{total}) `{last_name}`"
+                                content=(
+                                    f"⏳ Gathering match results since {REPORT_DAY_START_HOUR:02d}:00 "
+                                    f"from Riot... ({done}/{total}) `{last_name}`"
+                                )
                             )
 
                         report_text = await mood_service.build_today_win_rate_report(progress_callback=progress)
                         await status_message.edit(content=report_text)
                         remember_report_message(status_message)
-                        log(f"[mood] Sent last 24h win rate report in channel {CHANNEL_ID}.")
+                        log(
+                            f"[mood] Sent cycle win rate report (since {REPORT_DAY_START_HOUR:02d}:00) "
+                            f"in channel {CHANNEL_ID}."
+                        )
                 except (KeyError, requests.RequestException) as exc:
                     await status_message.edit(content=f"Mood report failed: {exc}")
                     log(f"[mood] Mood report failed: {exc}")
