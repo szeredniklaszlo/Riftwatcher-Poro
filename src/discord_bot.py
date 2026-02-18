@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import contextvars
 import json
 import time
@@ -108,7 +108,7 @@ async def send_riot_key_expired_alert():
     if channel is None:
         return
     await channel.send(
-        "@NoxVain ⚠️ Riot API returned 401 Unauthorized. "
+        "@NoxVain âš ï¸ Riot API returned 401 Unauthorized. "
         "Your RIOT_API_KEY is likely expired or invalid. "
         "Update the Railway variable `RIOT_API_KEY`."
     )
@@ -280,15 +280,17 @@ def match_recap_state_key(riot_id):
 
 def format_recap_queue_name(queue_id):
     if queue_id == 420:
-        return "Ranked Solo/Duo"
+        return "\U0001F3C6 Ranked Solo/Duo"
     if queue_id == 440:
-        return "Ranked Flex"
-    return f"Queue {queue_id}"
+        return "\U0001F3C6 Ranked Flex"
+    return f"\U0001F3AF Queue {queue_id}"
 
 
 def format_recap_player_line(riot_id, participant, match_duration_seconds):
     lol_name = riot_id.split("#", 1)[0]
-    result = "W" if participant.get("win") else "L"
+    won = bool(participant.get("win"))
+    result_label = "Win" if won else "Loss"
+    result_emoji = "\u2705" if won else "\u274C"
     champion = participant.get("championName", "Unknown")
     kills = int(participant.get("kills", 0) or 0)
     deaths = int(participant.get("deaths", 0) or 0)
@@ -300,12 +302,9 @@ def format_recap_player_line(riot_id, participant, match_duration_seconds):
     objective_damage = int(participant.get("damageDealtToObjectives", 0) or 0)
     vision_score = int(participant.get("visionScore", 0) or 0)
     return (
-        f"• **{lol_name}** `{result}` {champion} | "
-        f"K/D/A `{kills}/{deaths}/{assists}` | "
-        f"CS/m `{cs_per_min:.1f}` | "
-        f"Dmg `{player_damage:,}` | "
-        f"Obj `{objective_damage:,}` | "
-        f"Vis `{vision_score}`"
+        f"{result_emoji} **{lol_name}** | **{champion}** ({result_label})\n"
+        f"   \u2694\uFE0F `K/D/A {kills}/{deaths}/{assists}`  \U0001F33E `CS/min {cs_per_min:.1f}`\n"
+        f"   \U0001F4A5 `Damage {player_damage:,}`  \U0001F3F0 `Objectives {objective_damage:,}`  \U0001F441\uFE0F `Vision {vision_score}`"
     )
 
 
@@ -376,14 +375,12 @@ async def background_match_recap_notifier():
                     queue_name = format_recap_queue_name(queue_id)
                     end_local = datetime.fromtimestamp(end_ts, tz=REPORT_TIMEZONE)
                     lines = [
-                        f"🎮 **New Match** `{queue_name}`",
-                        f"_Ended {end_local:%d.%m.%Y %H:%M}_",
+                        "\U0001F3AE **New Match Recap**",
+                        f"`{queue_name}` - \U0001F552 `{end_local:%d.%m.%Y %H:%M}`",
                         "",
                     ]
                     for riot_id, participant in sorted(tracked_participants, key=lambda row: row[0].casefold()):
                         lines.append(format_recap_player_line(riot_id, participant, duration_seconds))
-                    lines.append("")
-                    lines.append(f"`{match_id}`")
                     message = "\n".join(lines)
                     if len(message) > 2000:
                         message = message[:1950] + "\n..."
@@ -570,7 +567,7 @@ async def on_message(message):
 
     if content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} "):
         raw_riot_id = content[len(DEBUG_PLAYER_COMMAND):].strip()
-        status_message = await message.channel.send(f"⏳ Building debug report for `{raw_riot_id}`...")
+        status_message = await message.channel.send(f"â³ Building debug report for `{raw_riot_id}`...")
         try:
             report_text = await riot_client.build_debug_player_report(
                 raw_riot_id,
@@ -597,12 +594,12 @@ async def on_message(message):
 
         try:
             if MOOD_REQUEST_LOCK.locked():
-                await message.channel.send("⏳ A mood report is already in progress. Please wait for it to finish.")
+                await message.channel.send("â³ A mood report is already in progress. Please wait for it to finish.")
                 return
 
             async with MOOD_REQUEST_LOCK:
                 loading_text = (
-                    f"⏳ Gathering match results since {REPORT_DAY_START_HOUR:02d}:00 from Riot..."
+                    f"â³ Gathering match results since {REPORT_DAY_START_HOUR:02d}:00 from Riot..."
                 )
                 status_message = await get_or_create_report_message(message.channel, loading_text)
                 if status_message.content != loading_text:
@@ -630,7 +627,7 @@ async def on_message(message):
                         async def progress(done, total, last_name):
                             await status_message.edit(
                                 content=(
-                                    f"⏳ Gathering match results since {REPORT_DAY_START_HOUR:02d}:00 "
+                                    f"â³ Gathering match results since {REPORT_DAY_START_HOUR:02d}:00 "
                                     f"from Riot... ({done}/{total}) `{last_name}`"
                                 )
                             )
@@ -668,7 +665,7 @@ async def on_message(message):
             await message.channel.send(f"`{riot_id}` is already tracked.")
             return
 
-        status_message = await message.channel.send(f"⏳ Validating `{riot_id}` with Riot API...")
+        status_message = await message.channel.send(f"â³ Validating `{riot_id}` with Riot API...")
         try:
             await riot_client.fetch_puuid(riot_id)
         except (KeyError, requests.RequestException) as exc:
@@ -684,7 +681,7 @@ async def on_message(message):
 
         await status_message.edit(
             content=(
-                f"✅ Added `{riot_id}` and saved to postgres. "
+                f"âœ… Added `{riot_id}` and saved to postgres. "
                 f"Total tracked players: {len(FRIENDS)}"
             )
         )
@@ -698,3 +695,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
