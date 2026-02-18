@@ -1,10 +1,11 @@
 import asyncio
+import contextvars
 import json
-import math
 import os
 import queue
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -16,7 +17,17 @@ try:
 except ImportError:
     psycopg = None
 
-from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, MOOD_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND
+from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, MOOD_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND
+from src.report_logic import (
+    create_mode_records,
+    format_mode_line,
+    get_match_end_unix_seconds,
+    get_mode_bucket,
+    get_mode_totals,
+    is_match_in_last_24h,
+    rank_sort_key,
+    wilson_lower_bound,
+)
 
 
 def require_env(name):
@@ -55,6 +66,16 @@ def get_env_bool(name, default=False):
 
 def log(message):
     timestamp = datetime.now().isoformat(timespec="seconds")
+    request_id = REQUEST_ID_CONTEXT.get()
+    if LOG_JSON:
+        payload = {"ts": timestamp, "msg": message}
+        if request_id:
+            payload["request_id"] = request_id
+        print(json.dumps(payload, ensure_ascii=True))
+        return
+    if request_id:
+        print(f"[{timestamp}] [{request_id}] {message}")
+        return
     print(f"[{timestamp}] {message}")
 
 
@@ -68,10 +89,12 @@ except Exception as exc:
     raise RuntimeError(f"Invalid REPORT_TIMEZONE '{REPORT_TIMEZONE_NAME}': {exc}") from exc
 
 LOG_RIOT_REQUESTS = get_env_bool("LOG_RIOT_REQUESTS", False)
+LOG_JSON = get_env_bool("LOG_JSON", False)
 MAX_MATCHES_PER_PLAYER = int(os.getenv("MAX_MATCHES_PER_PLAYER", "25"))
 REPORT_CACHE_SECONDS = int(os.getenv("REPORT_CACHE_SECONDS", "120"))
 MAX_TODAY_MATCH_DETAILS = int(os.getenv("MAX_TODAY_MATCH_DETAILS", "20"))
 DAILY_REFRESH_SECONDS = int(os.getenv("DAILY_REFRESH_SECONDS", "300"))
+MATCH_CACHE_RETENTION_DAYS = int(os.getenv("MATCH_CACHE_RETENTION_DAYS", "31"))
 DATABASE_URL = require_env("DATABASE_URL")
 if psycopg is None:
     raise RuntimeError("DATABASE_URL is set but psycopg is not installed. Add psycopg[binary] to dependencies.")
@@ -80,6 +103,13 @@ DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
 DB_POOL = None
 DB_POOL_LOCK = threading.Lock()
 DB_POOL_TOTAL = 0
+REQUEST_ID_CONTEXT = contextvars.ContextVar("request_id", default=None)
+START_MONOTONIC = time.monotonic()
+LAST_CACHE_CLEANUP_AT = 0.0
+
+
+def create_request_id(prefix):
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
 def get_default_friends():
@@ -322,6 +352,30 @@ def db_upsert_match_info(match_id, match_info):
         """,
         (match_id, payload),
     )
+
+
+def db_cleanup_old_match_cache(retention_days):
+    if not DB_ENABLED:
+        return 0
+    row = db_execute(
+        """
+        DELETE FROM match_info_cache
+        WHERE updated_at < NOW() - (%s * INTERVAL '1 day')
+        RETURNING match_id;
+        """,
+        (max(1, retention_days),),
+        fetch=True,
+    ) or []
+    return len(row)
+
+
+def db_health_stats():
+    if not DB_ENABLED:
+        return {"db_ok": False, "match_cache_entries": 0}
+    ping = db_execute("SELECT 1;", fetchone=True)
+    count_row = db_execute("SELECT COUNT(*) FROM match_info_cache;", fetchone=True)
+    count = int(count_row[0]) if count_row and count_row[0] is not None else 0
+    return {"db_ok": bool(ping and ping[0] == 1), "match_cache_entries": count}
 
 
 def db_upsert_player(riot_id, puuid=None):
@@ -614,83 +668,11 @@ async def fetch_match_info(match_id):
     return match_info
 
 
-def get_match_end_report_date(match_info):
-    end_ms = match_info["info"].get("gameEndTimestamp")
-    if not end_ms:
-        creation_ms = match_info["info"].get("gameCreation", 0)
-        duration_s = match_info["info"].get("gameDuration", 0)
-        end_ms = creation_ms + (duration_s * 1000)
-    return datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc).astimezone(REPORT_TIMEZONE).date()
-
-
-def get_match_end_unix_seconds(match_info):
-    end_ms = match_info["info"].get("gameEndTimestamp")
-    if not end_ms:
-        creation_ms = match_info["info"].get("gameCreation", 0)
-        duration_s = match_info["info"].get("gameDuration", 0)
-        end_ms = creation_ms + (duration_s * 1000)
-    return int(end_ms / 1000)
-
-
-def is_match_in_last_24h(match_info):
-    end_ts = get_match_end_unix_seconds(match_info)
-    return end_ts >= get_last_24h_start_unix_seconds()
-
-
 def get_participant_win(match_info, puuid):
     for participant in match_info["info"]["participants"]:
         if participant["puuid"] == puuid:
             return participant["win"]
     return None
-
-
-def get_mode_bucket(queue_id):
-    if queue_id == 420:
-        return "solo_duo"
-    if queue_id == 440:
-        return "flex"
-    return "arcade"
-
-
-def create_mode_records():
-    return {
-        "solo_duo": {"wins": 0, "losses": 0},
-        "flex": {"wins": 0, "losses": 0},
-        "arcade": {"wins": 0, "losses": 0},
-    }
-
-
-def get_mode_totals(mode_records):
-    wins = sum(bucket["wins"] for bucket in mode_records.values())
-    losses = sum(bucket["losses"] for bucket in mode_records.values())
-    return wins, losses
-
-
-def wilson_lower_bound(wins, losses, z=1.96):
-    n = wins + losses
-    if n <= 0:
-        return 0.0
-    p = wins / n
-    z2 = z * z
-    denominator = 1 + (z2 / n)
-    center = p + (z2 / (2 * n))
-    margin = z * math.sqrt((p * (1 - p) + (z2 / (4 * n))) / n)
-    return (center - margin) / denominator
-
-
-def rank_sort_key(row):
-    wins = row[2]
-    losses = row[3]
-    win_rate = row[4]
-    return (-wilson_lower_bound(wins, losses), -win_rate, -(wins + losses), row[0].lower())
-
-
-def format_mode_line(label, wins, losses):
-    total = wins + losses
-    if total == 0:
-        return f"   {label}: `0W-0L` - **N/A**"
-    win_rate = (wins / total) * 100
-    return f"   {label}: `{wins}W-{losses}L` - **{win_rate:.1f}%**"
 
 
 def append_mode_line_if_games(report_lines, label, wins, losses):
@@ -1027,14 +1009,26 @@ async def edit_last_report_message():
 
 
 async def background_daily_refresher():
+    global LAST_CACHE_CLEANUP_AT
     if not DB_ENABLED:
         return
     while not client.is_closed():
+        token = REQUEST_ID_CONTEXT.set(create_request_id("bg"))
         try:
             await refresh_daily_stats_once()
             await edit_last_report_message()
+            now_mono = time.monotonic()
+            if (now_mono - LAST_CACHE_CLEANUP_AT) >= max(3600, DAILY_REFRESH_SECONDS):
+                deleted = await asyncio.to_thread(db_cleanup_old_match_cache, MATCH_CACHE_RETENTION_DAYS)
+                LAST_CACHE_CLEANUP_AT = now_mono
+                log(
+                    f"[refresh] Match cache cleanup complete: deleted={deleted}, "
+                    f"retention_days={MATCH_CACHE_RETENTION_DAYS}"
+                )
         except Exception as exc:
             log(f"[refresh] Unexpected error: {exc}")
+        finally:
+            REQUEST_ID_CONTEXT.reset(token)
         await asyncio.sleep(max(30, DAILY_REFRESH_SECONDS))
 
 
@@ -1044,6 +1038,26 @@ async def run_riot_connectivity_test():
     start_time_unix = get_last_24h_start_unix_seconds()
     match_ids = await fetch_match_ids(puuid, start_time_unix)
     return riot_id, puuid, len(match_ids)
+
+
+async def run_health_check():
+    uptime_seconds = int(time.monotonic() - START_MONOTONIC)
+    try:
+        db_stats = await asyncio.to_thread(db_health_stats)
+        db_ok = db_stats["db_ok"]
+        cache_entries = db_stats["match_cache_entries"]
+    except Exception as exc:
+        db_ok = False
+        cache_entries = 0
+        log(f"[health] DB health check failed: {exc}")
+
+    return {
+        "uptime_seconds": uptime_seconds,
+        "tracked_players": len(FRIENDS),
+        "db_ok": db_ok,
+        "match_cache_entries": cache_entries,
+        "request_cache_active": REPORT_CACHE["text"] is not None,
+    }
 
 
 async def build_debug_player_report(riot_id):
@@ -1107,13 +1121,16 @@ async def on_ready():
     log(f"[startup] Use {MOOD_COMMAND} in channel {CHANNEL_ID} for last 24h win rates.")
     log(f"[startup] Use {ADD_COMMAND} <Name#Tag> to add a player at runtime.")
     log(f"[startup] Use {DEBUG_PLAYER_COMMAND} <Name#Tag> to inspect queue bucket mapping.")
+    log(f"[startup] Use {HEALTH_COMMAND} in channel {CHANNEL_ID} for health status.")
     log(f"[startup] Loaded {len(FRIENDS)} tracked players from postgres.")
     log("[startup] Player store: postgres")
     log(f"[startup] Report timezone: {REPORT_TIMEZONE_NAME}")
     log(f"[startup] LOG_RIOT_REQUESTS={LOG_RIOT_REQUESTS}")
+    log(f"[startup] LOG_JSON={LOG_JSON}")
     log(f"[startup] MAX_MATCHES_PER_PLAYER={MAX_MATCHES_PER_PLAYER}")
     log(f"[startup] MAX_TODAY_MATCH_DETAILS={MAX_TODAY_MATCH_DETAILS}")
     log(f"[startup] REPORT_CACHE_SECONDS={REPORT_CACHE_SECONDS}")
+    log(f"[startup] MATCH_CACHE_RETENTION_DAYS={MATCH_CACHE_RETENTION_DAYS}")
     if DB_ENABLED:
         log(f"[startup] DAILY_REFRESH_SECONDS={DAILY_REFRESH_SECONDS}")
         if BACKGROUND_REFRESH_TASK is None or BACKGROUND_REFRESH_TASK.done():
@@ -1158,6 +1175,22 @@ async def on_message(message):
             log(f"[test] Riot API test failed: {exc}")
         return
 
+    if content_lower == HEALTH_COMMAND.casefold():
+        stats = await run_health_check()
+        uptime = str(timedelta(seconds=stats["uptime_seconds"]))
+        await message.channel.send(
+            (
+                f"Health OK\n"
+                f"- Uptime: `{uptime}`\n"
+                f"- Tracked players: `{stats['tracked_players']}`\n"
+                f"- DB: `{'ok' if stats['db_ok'] else 'down'}`\n"
+                f"- Match cache entries: `{stats['match_cache_entries']}`\n"
+                f"- Report cache active: `{'yes' if stats['request_cache_active'] else 'no'}`"
+            )
+        )
+        log("[health] Sent health status message.")
+        return
+
     if content_lower == DEBUG_PLAYER_COMMAND.casefold():
         await message.channel.send("Usage: `!DebugPlayer Name#Tag`")
         return
@@ -1178,57 +1211,62 @@ async def on_message(message):
         return
 
     if content_lower == MOOD_COMMAND.casefold():
+        request_id = create_request_id("mood")
+        token = REQUEST_ID_CONTEXT.set(request_id)
         try:
             await message.delete()
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
             log(f"[mood] Could not delete command message {message.id}: {exc}")
 
-        if MOOD_REQUEST_LOCK.locked():
-            await message.channel.send("\u23F3 A mood report is already in progress. Please wait for it to finish.")
-            return
+        try:
+            if MOOD_REQUEST_LOCK.locked():
+                await message.channel.send("\u23F3 A mood report is already in progress. Please wait for it to finish.")
+                return
 
-        async with MOOD_REQUEST_LOCK:
-            loading_text = "\u23F3 Gathering last 24h match results from Riot..."
-            status_message = await get_or_create_report_message(message.channel, loading_text)
-            if status_message.content != loading_text:
-                await status_message.edit(content=loading_text)
-            try:
-                if DB_ENABLED:
-                    # Show stored snapshot immediately.
-                    snapshot_text = await build_today_win_rate_report()
-                    refresh_note = "_Refreshing latest matches..._"
-                    snapshot_with_note = f"{snapshot_text}\n\n{refresh_note}"
-                    if len(snapshot_with_note) > 2000:
-                        snapshot_with_note = snapshot_text
-                    await status_message.edit(content=snapshot_with_note)
-                    displayed_text = snapshot_with_note
-                    remember_report_message(status_message)
-                    log(f"[mood] Sent stored snapshot report in channel {CHANNEL_ID}.")
+            async with MOOD_REQUEST_LOCK:
+                loading_text = "\u23F3 Gathering last 24h match results from Riot..."
+                status_message = await get_or_create_report_message(message.channel, loading_text)
+                if status_message.content != loading_text:
+                    await status_message.edit(content=loading_text)
+                try:
+                    if DB_ENABLED:
+                        # Show stored snapshot immediately.
+                        snapshot_text = await build_today_win_rate_report()
+                        refresh_note = "_Refreshing latest matches..._"
+                        snapshot_with_note = f"{snapshot_text}\n\n{refresh_note}"
+                        if len(snapshot_with_note) > 2000:
+                            snapshot_with_note = snapshot_text
+                        await status_message.edit(content=snapshot_with_note)
+                        displayed_text = snapshot_with_note
+                        remember_report_message(status_message)
+                        log(f"[mood] Sent stored snapshot report in channel {CHANNEL_ID}.")
 
-                    # Refresh latest matches and update the same message after refresh completes.
-                    await refresh_recent_matches_snapshot(recent_count=1)
-                    refreshed_text = await build_today_win_rate_report()
-                    if refreshed_text != displayed_text:
-                        await status_message.edit(content=refreshed_text)
-                        log(f"[mood] Updated report after quick refresh in channel {CHANNEL_ID}.")
+                        # Refresh latest matches and update the same message after refresh completes.
+                        await refresh_recent_matches_snapshot(recent_count=1)
+                        refreshed_text = await build_today_win_rate_report()
+                        if refreshed_text != displayed_text:
+                            await status_message.edit(content=refreshed_text)
+                            log(f"[mood] Updated report after quick refresh in channel {CHANNEL_ID}.")
+                        else:
+                            log(f"[mood] Quick refresh produced no visible report change.")
                     else:
-                        log(f"[mood] Quick refresh produced no visible report change.")
-                else:
-                    async def progress(done, total, last_name):
-                        await status_message.edit(
-                            content=f"\u23F3 Gathering last 24h match results from Riot... ({done}/{total}) `{last_name}`"
-                        )
+                        async def progress(done, total, last_name):
+                            await status_message.edit(
+                                content=f"\u23F3 Gathering last 24h match results from Riot... ({done}/{total}) `{last_name}`"
+                            )
 
-                    report_text = await build_today_win_rate_report(progress_callback=progress)
-                    await status_message.edit(content=report_text)
-                    remember_report_message(status_message)
-                    log(f"[mood] Sent last 24h win rate report in channel {CHANNEL_ID}.")
-            except (KeyError, requests.RequestException) as exc:
-                await status_message.edit(content=f"Mood report failed: {exc}")
-                log(f"[mood] Mood report failed: {exc}")
-            except Exception as exc:
-                await status_message.edit(content=f"Mood report failed unexpectedly: {exc}")
-                log(f"[mood] Unexpected mood report failure: {exc}")
+                        report_text = await build_today_win_rate_report(progress_callback=progress)
+                        await status_message.edit(content=report_text)
+                        remember_report_message(status_message)
+                        log(f"[mood] Sent last 24h win rate report in channel {CHANNEL_ID}.")
+                except (KeyError, requests.RequestException) as exc:
+                    await status_message.edit(content=f"Mood report failed: {exc}")
+                    log(f"[mood] Mood report failed: {exc}")
+                except Exception as exc:
+                    await status_message.edit(content=f"Mood report failed unexpectedly: {exc}")
+                    log(f"[mood] Unexpected mood report failure: {exc}")
+        finally:
+            REQUEST_ID_CONTEXT.reset(token)
         return
 
     if content_lower == ADD_COMMAND.casefold():
