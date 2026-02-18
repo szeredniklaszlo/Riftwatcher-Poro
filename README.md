@@ -50,7 +50,6 @@ Required:
 
 Optional:
 
-- `RIOT_FRIENDS` (seed list when DB has no players)
 - `REPORT_TIMEZONE` (default: `UTC`, example: `Europe/Oslo`)
 - `LOG_RIOT_REQUESTS` (default: `false`)
 - `LOG_JSON` (default: `false`, emits JSON logs with request IDs)
