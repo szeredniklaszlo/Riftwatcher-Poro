@@ -95,6 +95,7 @@ REPORT_CACHE_SECONDS = int(os.getenv("REPORT_CACHE_SECONDS", "120"))
 MAX_TODAY_MATCH_DETAILS = int(os.getenv("MAX_TODAY_MATCH_DETAILS", "20"))
 DAILY_REFRESH_SECONDS = int(os.getenv("DAILY_REFRESH_SECONDS", "300"))
 MATCH_CACHE_RETENTION_DAYS = int(os.getenv("MATCH_CACHE_RETENTION_DAYS", "31"))
+RIOT_KEY_ALERT_COOLDOWN_SECONDS = int(os.getenv("RIOT_KEY_ALERT_COOLDOWN_SECONDS", "3600"))
 DATABASE_URL = require_env("DATABASE_URL")
 if psycopg is None:
     raise RuntimeError("DATABASE_URL is set but psycopg is not installed. Add psycopg[binary] to dependencies.")
@@ -106,10 +107,38 @@ DB_POOL_TOTAL = 0
 REQUEST_ID_CONTEXT = contextvars.ContextVar("request_id", default=None)
 START_MONOTONIC = time.monotonic()
 LAST_CACHE_CLEANUP_AT = 0.0
+LAST_RIOT_401_ALERT_AT = 0.0
+RIOT_ALERT_LOCK = threading.Lock()
 
 
 def create_request_id(prefix):
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+async def send_riot_key_expired_alert():
+    channel = await resolve_channel(CHANNEL_ID)
+    if channel is None:
+        return
+    await channel.send(
+        "\u26A0\uFE0F Riot API returned 401 Unauthorized. "
+        "Your RIOT_API_KEY is likely expired or invalid. "
+        "Update the Railway variable `RIOT_API_KEY`."
+    )
+    log("[riot] Sent RIOT_API_KEY expiry alert.")
+
+
+def trigger_riot_key_alert():
+    global LAST_RIOT_401_ALERT_AT
+    now = time.monotonic()
+    with RIOT_ALERT_LOCK:
+        if (now - LAST_RIOT_401_ALERT_AT) < max(60, RIOT_KEY_ALERT_COOLDOWN_SECONDS):
+            return
+        LAST_RIOT_401_ALERT_AT = now
+    try:
+        loop = client.loop
+        asyncio.run_coroutine_threadsafe(send_riot_key_expired_alert(), loop)
+    except Exception as exc:
+        log(f"[riot] Could not schedule key-expiry alert: {exc}")
 
 
 def get_default_friends():
@@ -559,6 +588,8 @@ def riot_get_json(url):
             log(f"[riot] {response.status_code} in {elapsed_ms}ms: {url}")
 
         if response.status_code != 429:
+            if response.status_code == 401:
+                trigger_riot_key_alert()
             response.raise_for_status()
             return response.json()
 
