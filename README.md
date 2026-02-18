@@ -25,9 +25,17 @@ MoodBot is a Discord bot that tracks League match mood for a tracked player list
   - Ranked Flex
 - Ranking based on Wilson lower bound (`z=1.28`).
 - Displays `Gamer Score` (Wilson score x 100) per player.
+- Adds per-player daily leader badges (ranked games only):
+  - `🌾` best CS/min
+  - `🏰` best objective damage
+  - `⚔️` best player damage
+  - `🗡️` most kills
+  - `☠️` most deaths
+  - `👁️` best vision score
 - Background refresh stores/reuses data in Postgres.
 - Background refresh updates the live scoreboard during long refresh cycles (at least every ~2 minutes, and no more than every ~30s on content changes).
 - Optional new-match recap posts to a separate Discord channel and groups tracked players from the same game into one message.
+  - Includes W/L, champion, K/D/A, CS/min, player damage, objective damage, and vision.
 - Persistent match cache and scoreboard message ID in Postgres.
 - Structured logging with optional JSON output and per-request IDs.
 - Automatic cleanup of cached match payloads (default retention: 31 days).
