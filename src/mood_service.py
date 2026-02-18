@@ -175,7 +175,7 @@ class MoodService:
         error_results = []
 
         if self.db_enabled:
-            stored_rows = await asyncio.to_thread(self.db_load_latest_stats)
+            stored_rows = await asyncio.to_thread(self.db_load_latest_stats, today_key)
             if stored_rows:
                 latest_updated_at = None
                 for row in stored_rows:

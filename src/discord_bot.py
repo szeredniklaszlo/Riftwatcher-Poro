@@ -78,11 +78,6 @@ def load_tracked_players():
     return db_load_tracked_players()
 
 
-def save_tracked_players(players):
-    for riot_id in players:
-        db_upsert_player(riot_id, None)
-
-
 init_db()
 FRIENDS = load_tracked_players()
 
@@ -94,7 +89,6 @@ MOOD_REQUEST_LOCK = asyncio.Lock()
 LAST_REPORT_MESSAGE = {"channel_id": None, "message_id": None}
 STARTUP_SCOREBOARD_INIT_DONE = False
 BACKGROUND_REFRESH_TASK = None
-SCHEDULER_TASK = None
 
 
 async def send_riot_key_expired_alert():
@@ -284,25 +278,9 @@ async def background_daily_refresher():
         await asyncio.sleep(max(30, DAILY_REFRESH_SECONDS))
 
 
-async def scheduler():
-    await client.wait_until_ready()
-    channel = await resolve_channel(CHANNEL_ID)
-    if channel is None:
-        return
-
-    while not client.is_closed():
-        now = datetime.now()
-        target = now.replace(hour=20, minute=0, second=0, microsecond=0)
-        if now > target:
-            target += timedelta(days=1)
-
-        await asyncio.sleep((target - now).total_seconds())
-        await daily_report(channel)
-
-
 @client.event
 async def on_ready():
-    global BACKGROUND_REFRESH_TASK, SCHEDULER_TASK, STARTUP_SCOREBOARD_INIT_DONE
+    global BACKGROUND_REFRESH_TASK, STARTUP_SCOREBOARD_INIT_DONE
     log(f"[startup] Logged in as {client.user} (id={client.user.id})")
     log(f"[startup] Use {TEST_COMMAND} in channel {CHANNEL_ID} to test sending.")
     log(f"[startup] Use {RIOT_TEST_COMMAND} in channel {CHANNEL_ID} to test Riot API access.")
@@ -332,10 +310,6 @@ async def on_ready():
             except Exception as exc:
                 log(f"[startup] Failed to initialize scoreboard: {exc}")
         STARTUP_SCOREBOARD_INIT_DONE = True
-    if SCHEDULER_TASK is None or SCHEDULER_TASK.done():
-        SCHEDULER_TASK = client.loop.create_task(scheduler())
-
-
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -487,7 +461,7 @@ async def on_message(message):
 
         FRIENDS.append(riot_id)
         try:
-            save_tracked_players(FRIENDS)
+            db_upsert_player(riot_id, None)
         except Exception as exc:
             await status_message.edit(content=f"Added `{riot_id}`, but failed to persist to postgres: {exc}")
             return

@@ -318,15 +318,17 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records):
     )
 
 
-def db_load_latest_stats():
+def db_load_latest_stats(day_date):
     rows = db_execute(
         """
         SELECT DISTINCT ON (lower(riot_id))
             riot_id, solo_wins, solo_losses, flex_wins, flex_losses,
             arcade_wins, arcade_losses, total_wins, total_losses, updated_at
         FROM player_daily_stats
+        WHERE day_date = %s
         ORDER BY lower(riot_id), updated_at DESC;
         """,
+        (day_date,),
         fetch=True,
     )
     return rows or []
