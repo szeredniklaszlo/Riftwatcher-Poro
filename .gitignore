@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 bot.env
 tracked_players.txt
+AGENTS.md
