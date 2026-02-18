@@ -3,8 +3,7 @@ import contextvars
 import json
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
+from datetime import datetime, timedelta
 
 import discord
 import requests
@@ -12,16 +11,8 @@ import requests
 from src import config as cfg
 from src import db as dbm
 from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, MOOD_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND
-from src.report_logic import (
-    create_mode_records,
-    format_mode_line,
-    get_match_end_unix_seconds,
-    get_mode_bucket,
-    get_mode_totals,
-    is_match_in_last_24h,
-    rank_sort_key,
-    wilson_lower_bound,
-)
+from src.mood_service import MoodService
+from src.riot_api import RiotApiClient
 
 
 def log(message):
@@ -39,6 +30,10 @@ def log(message):
     print(f"[{timestamp}] {message}")
 
 
+def create_request_id(prefix):
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
 TOKEN = cfg.TOKEN
 RIOT_API_KEY = cfg.RIOT_API_KEY
 CHANNEL_ID = cfg.CHANNEL_ID
@@ -54,23 +49,25 @@ MATCH_CACHE_RETENTION_DAYS = cfg.MATCH_CACHE_RETENTION_DAYS
 DB_ENABLED = dbm.DB_ENABLED
 
 normalize_riot_id = cfg.normalize_riot_id
+get_default_friends = cfg.get_default_friends
 
 db_cleanup_old_match_cache = dbm.db_cleanup_old_match_cache
 db_get_last_report_message = dbm.db_get_last_report_message
 db_get_last_seen_match_id = dbm.db_get_last_seen_match_id
 db_get_match_info = dbm.db_get_match_info
 db_get_puuid = dbm.db_get_puuid
-db_get_state = dbm.db_get_state
 db_health_stats = dbm.db_health_stats
 db_load_latest_stats = dbm.db_load_latest_stats
 db_load_tracked_players = dbm.db_load_tracked_players
 db_set_last_report_message = dbm.db_set_last_report_message
 db_set_last_seen_match_id = dbm.db_set_last_seen_match_id
 db_set_state = dbm.db_set_state
+db_get_state = dbm.db_get_state
 db_upsert_daily_stats = dbm.db_upsert_daily_stats
 db_upsert_match_info = dbm.db_upsert_match_info
 db_upsert_player = dbm.db_upsert_player
 init_db = dbm.init_db
+
 REQUEST_ID_CONTEXT = contextvars.ContextVar("request_id", default=None)
 START_MONOTONIC = time.monotonic()
 LAST_CACHE_CLEANUP_AT = 0.0
@@ -78,8 +75,33 @@ RIOT_401_ALERT_SENT = False
 RIOT_ALERT_LOCK = asyncio.Lock()
 
 
-def create_request_id(prefix):
-    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+def load_tracked_players():
+    players = db_load_tracked_players()
+    if players:
+        return players
+    defaults = get_default_friends()
+    for riot_id in defaults:
+        db_upsert_player(riot_id, None)
+    return defaults
+
+
+def save_tracked_players(players):
+    for riot_id in players:
+        db_upsert_player(riot_id, None)
+
+
+init_db()
+FRIENDS = load_tracked_players()
+
+intents = discord.Intents.default()
+intents.message_content = True
+client = discord.Client(intents=intents)
+MOOD_REQUEST_LOCK = asyncio.Lock()
+
+LAST_REPORT_MESSAGE = {"channel_id": None, "message_id": None}
+STARTUP_SCOREBOARD_INIT_DONE = False
+BACKGROUND_REFRESH_TASK = None
+SCHEDULER_TASK = None
 
 
 async def send_riot_key_expired_alert():
@@ -87,7 +109,7 @@ async def send_riot_key_expired_alert():
     if channel is None:
         return
     await channel.send(
-        "@NoxVain \u26A0\uFE0F Riot API returned 401 Unauthorized. "
+        "@NoxVain ⚠️ Riot API returned 401 Unauthorized. "
         "Your RIOT_API_KEY is likely expired or invalid. "
         "Update the Railway variable `RIOT_API_KEY`."
     )
@@ -126,35 +148,34 @@ def trigger_riot_key_alert():
         log(f"[riot] Could not schedule key-expiry alert: {exc}")
 
 
-def load_tracked_players():
-    players = db_load_tracked_players()
-    if players:
-        return players
-    defaults = get_default_friends()
-    for riot_id in defaults:
-        db_upsert_player(riot_id, None)
-    return defaults
+riot_client = RiotApiClient(
+    riot_api_key=RIOT_API_KEY,
+    log=log,
+    log_riot_requests=LOG_RIOT_REQUESTS,
+    report_timezone=REPORT_TIMEZONE,
+    max_matches_per_player=MAX_MATCHES_PER_PLAYER,
+    max_today_match_details=MAX_TODAY_MATCH_DETAILS,
+    db_get_puuid=db_get_puuid,
+    db_upsert_player=db_upsert_player,
+    db_get_match_info=db_get_match_info,
+    db_upsert_match_info=db_upsert_match_info,
+    db_set_last_seen_match_id=db_set_last_seen_match_id,
+    on_unauthorized=trigger_riot_key_alert,
+)
 
-
-def save_tracked_players(players):
-    for riot_id in players:
-        db_upsert_player(riot_id, None)
-
-
-init_db()
-FRIENDS = load_tracked_players()
-
-intents = discord.Intents.default()
-intents.message_content = True
-client = discord.Client(intents=intents)
-MOOD_REQUEST_LOCK = asyncio.Lock()
-PUUID_CACHE = {}
-MATCH_INFO_CACHE = {}
-REPORT_CACHE = {"text": None, "expires_at": 0.0, "day": None}
-LAST_REPORT_MESSAGE = {"channel_id": None, "message_id": None}
-STARTUP_SCOREBOARD_INIT_DONE = False
-BACKGROUND_REFRESH_TASK = None
-SCHEDULER_TASK = None
+mood_service = MoodService(
+    log=log,
+    friends=FRIENDS,
+    riot_client=riot_client,
+    report_timezone=REPORT_TIMEZONE,
+    report_cache_seconds=REPORT_CACHE_SECONDS,
+    daily_refresh_seconds=DAILY_REFRESH_SECONDS,
+    db_enabled=DB_ENABLED,
+    db_load_latest_stats=db_load_latest_stats,
+    db_upsert_daily_stats=db_upsert_daily_stats,
+    db_get_last_seen_match_id=db_get_last_seen_match_id,
+    db_health_stats=db_health_stats,
+)
 
 
 def remember_report_message(message):
@@ -166,6 +187,20 @@ def remember_report_message(message):
             loop.create_task(asyncio.to_thread(db_set_last_report_message, message.channel.id, message.id))
         except RuntimeError:
             db_set_last_report_message(message.channel.id, message.id)
+
+
+async def resolve_channel(channel_id):
+    channel = client.get_channel(channel_id)
+    if channel is not None:
+        return channel
+
+    try:
+        return await client.fetch_channel(channel_id)
+    except (discord.NotFound, discord.Forbidden) as exc:
+        log(f"[channel] Could not access channel {channel_id}: {exc}")
+    except discord.HTTPException as exc:
+        log(f"[channel] Discord API error while fetching channel {channel_id}: {exc}")
+    return None
 
 
 async def get_or_create_report_message(channel, initial_content):
@@ -194,441 +229,6 @@ async def get_or_create_report_message(channel, initial_content):
     return message
 
 
-def riot_get_json(url):
-    headers = {"X-Riot-Token": RIOT_API_KEY}
-    max_attempts = 4
-
-    for attempt in range(1, max_attempts + 1):
-        start_time = time.perf_counter()
-        response = requests.get(url, headers=headers, timeout=20)
-        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-        if LOG_RIOT_REQUESTS:
-            log(f"[riot] {response.status_code} in {elapsed_ms}ms: {url}")
-
-        if response.status_code != 429:
-            if response.status_code == 401:
-                trigger_riot_key_alert()
-            response.raise_for_status()
-            return response.json()
-
-        retry_after_header = response.headers.get("Retry-After", "1")
-        try:
-            retry_after = float(retry_after_header)
-        except ValueError:
-            retry_after = 1.0
-
-        if attempt == max_attempts:
-            response.raise_for_status()
-
-        sleep_seconds = max(1.0, retry_after)
-        log(f"[riot] 429 received. attempt={attempt}/{max_attempts}, sleep={sleep_seconds}s")
-        time.sleep(sleep_seconds)
-
-
-async def riot_get_json_async(url):
-    return await asyncio.to_thread(riot_get_json, url)
-
-
-def split_riot_id(riot_id):
-    game_name, tag_line = riot_id.split("#", 1)
-    return game_name, tag_line
-
-
-def get_lol_name(riot_id):
-    game_name, _ = split_riot_id(riot_id)
-    return game_name
-
-
-async def resolve_channel(channel_id):
-    channel = client.get_channel(channel_id)
-    if channel is not None:
-        return channel
-
-    try:
-        return await client.fetch_channel(channel_id)
-    except (discord.NotFound, discord.Forbidden) as exc:
-        log(f"[channel] Could not access channel {channel_id}: {exc}")
-    except discord.HTTPException as exc:
-        log(f"[channel] Discord API error while fetching channel {channel_id}: {exc}")
-    return None
-
-
-async def fetch_puuid(riot_id):
-    cache_key = riot_id.casefold()
-    if cache_key in PUUID_CACHE:
-        return PUUID_CACHE[cache_key]
-
-    persisted_puuid = await asyncio.to_thread(db_get_puuid, riot_id)
-    if persisted_puuid:
-        PUUID_CACHE[cache_key] = persisted_puuid
-        return persisted_puuid
-
-    game_name, tag_line = split_riot_id(riot_id)
-    encoded_name = quote(game_name, safe="")
-    encoded_tag = quote(tag_line, safe="")
-    url = (
-        "https://europe.api.riotgames.com/riot/account/v1/accounts/by-riot-id/"
-        f"{encoded_name}/{encoded_tag}"
-    )
-    data = await riot_get_json_async(url)
-    puuid = data["puuid"]
-    PUUID_CACHE[cache_key] = puuid
-    await asyncio.to_thread(db_upsert_player, riot_id, puuid)
-    return puuid
-
-
-def get_last_24h_start_unix_seconds():
-    now_utc = datetime.now(tz=timezone.utc)
-    return int((now_utc - timedelta(hours=24)).timestamp())
-
-
-async def fetch_match_ids(puuid, start_time_unix):
-    count = max(1, min(MAX_MATCHES_PER_PLAYER, 100))
-    url = (
-        "https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/"
-        f"{puuid}/ids?startTime={start_time_unix}&count={count}"
-    )
-    return await riot_get_json_async(url)
-
-
-async def fetch_recent_match_ids(puuid, count=20):
-    safe_count = max(1, min(count, 100))
-    url = (
-        "https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/"
-        f"{puuid}/ids?count={safe_count}"
-    )
-    return await riot_get_json_async(url)
-
-
-async def fetch_match_info(match_id):
-    cached = MATCH_INFO_CACHE.get(match_id)
-    if cached is not None:
-        return cached
-
-    persisted = await asyncio.to_thread(db_get_match_info, match_id)
-    if persisted is not None:
-        MATCH_INFO_CACHE[match_id] = persisted
-        return persisted
-
-    url = f"https://europe.api.riotgames.com/lol/match/v5/matches/{match_id}"
-    match_info = await riot_get_json_async(url)
-    MATCH_INFO_CACHE[match_id] = match_info
-    await asyncio.to_thread(db_upsert_match_info, match_id, match_info)
-    return match_info
-
-
-def get_participant_win(match_info, puuid):
-    for participant in match_info["info"]["participants"]:
-        if participant["puuid"] == puuid:
-            return participant["win"]
-    return None
-
-
-def append_mode_line_if_games(report_lines, label, wins, losses):
-    if wins + losses == 0:
-        return
-    report_lines.append(format_mode_line(label, wins, losses))
-
-
-async def get_today_mode_records(riot_id):
-    player_start = time.perf_counter()
-    puuid = await fetch_puuid(riot_id)
-    start_time_unix = get_last_24h_start_unix_seconds()
-    match_ids = await fetch_match_ids(puuid, start_time_unix)
-    if match_ids:
-        await asyncio.to_thread(db_set_last_seen_match_id, riot_id, match_ids[0])
-
-    mode_records = create_mode_records()
-    today_details_processed = 0
-    for match_id in match_ids:
-        match_info = await fetch_match_info(match_id)
-        if not is_match_in_last_24h(match_info):
-            continue
-
-        if today_details_processed >= max(1, MAX_TODAY_MATCH_DETAILS):
-            log(
-                f"[mood] {riot_id}: reached MAX_TODAY_MATCH_DETAILS={MAX_TODAY_MATCH_DETAILS}, "
-                "stopping further today match processing."
-            )
-            break
-
-        queue_id = match_info["info"].get("queueId", -1)
-        bucket_name = get_mode_bucket(queue_id)
-        result = get_participant_win(match_info, puuid)
-        if result is True:
-            mode_records[bucket_name]["wins"] += 1
-        elif result is False:
-            mode_records[bucket_name]["losses"] += 1
-        today_details_processed += 1
-
-    wins, losses = get_mode_totals(mode_records)
-    elapsed_ms = int((time.perf_counter() - player_start) * 1000)
-    log(
-        f"[mood] {riot_id}: matches={len(match_ids)} total={wins}W-{losses}L "
-        f"solo={mode_records['solo_duo']['wins']}W-{mode_records['solo_duo']['losses']}L "
-        f"flex={mode_records['flex']['wins']}W-{mode_records['flex']['losses']}L "
-        f"arcade={mode_records['arcade']['wins']}W-{mode_records['arcade']['losses']}L "
-        f"elapsed={elapsed_ms}ms"
-    )
-    today_key = datetime.now(tz=REPORT_TIMEZONE).date().isoformat()
-    await asyncio.to_thread(db_upsert_daily_stats, today_key, riot_id, mode_records)
-    return mode_records
-
-
-def format_report_from_results(ranked_results, error_results, report_start):
-    report_lines = ["\u2728------ **LEAGUE MOOD (LAST 24 HOURS)** ------\u2728", ""]
-    updated_at = datetime.now(tz=REPORT_TIMEZONE).strftime("%d.%m.%Y %H:%M")
-    if not ranked_results and not error_results:
-        report_lines.append("Looks like everyone has a life today.")
-        report_lines.append("We will keep you up to date of anyone crawls back into the hole.")
-        report_lines.append("")
-        report_lines.append("\u2728--------------------------------------------\u2728")
-        report_lines.append(f"_Last updated: {updated_at}_")
-        total_elapsed_ms = int((time.perf_counter() - report_start) * 1000)
-        log(
-            f"[mood] Report complete: players={len(FRIENDS)} "
-            "ranked=0 hidden_no_matches=all errors=0 "
-            f"elapsed={total_elapsed_ms}ms"
-        )
-        return "\n".join(report_lines)
-
-    for index, (lol_name, mode_records, wins, losses, win_rate) in enumerate(ranked_results):
-        wilson_score = wilson_lower_bound(wins, losses)
-        gamer_score = wilson_score * 100
-        if wins + losses > 0 and wilson_score <= 0:
-            mood_emoji = "\U0001F480"
-        elif wilson_score >= 0.75:
-            mood_emoji = "\U0001F601"
-        elif wilson_score >= 0.60:
-            mood_emoji = "\U0001F60A"
-        elif wilson_score >= 0.50:
-            mood_emoji = "\U0001F642"
-        elif wilson_score >= 0.40:
-            mood_emoji = "\U0001F610"
-        elif wilson_score >= 0.30:
-            mood_emoji = "\U0001F615"
-        elif wilson_score >= 0.20:
-            mood_emoji = "\U0001F61E"
-        else:
-            mood_emoji = "\U0001F62D"
-
-        display_emoji = "\u2B50" if index == 0 else mood_emoji
-        report_lines.append(f"{display_emoji}  **{lol_name}**  |  Gamer Score: **{gamer_score:.1f}**")
-        append_mode_line_if_games(
-            report_lines,
-            "Ranked Solo/Duo",
-            mode_records["solo_duo"]["wins"],
-            mode_records["solo_duo"]["losses"],
-        )
-        append_mode_line_if_games(
-            report_lines,
-            "Ranked Flex",
-            mode_records["flex"]["wins"],
-            mode_records["flex"]["losses"],
-        )
-        append_mode_line_if_games(
-            report_lines,
-            "Arcade",
-            mode_records["arcade"]["wins"],
-            mode_records["arcade"]["losses"],
-        )
-        report_lines.append(f"   Total: `{wins}W-{losses}L` - **{win_rate:.1f}%**")
-        report_lines.append("")
-
-    for lol_name, error_text in sorted(error_results, key=lambda row: row[0].lower()):
-        report_lines.append(f"\u26AB  **{lol_name}**")
-        report_lines.append(f"   Riot error: `{error_text}`")
-        report_lines.append("")
-
-    report_lines.append("\u2728--------------------------------------------\u2728")
-    report_lines.append(f"_Last updated: {updated_at}_")
-    total_elapsed_ms = int((time.perf_counter() - report_start) * 1000)
-    log(
-        f"[mood] Report complete: players={len(FRIENDS)} "
-        f"ranked={len(ranked_results)} hidden_no_matches={len(FRIENDS) - len(ranked_results) - len(error_results)} "
-        f"errors={len(error_results)} elapsed={total_elapsed_ms}ms"
-    )
-    report_text = "\n".join(report_lines)
-    if len(report_text) <= 2000:
-        return report_text
-
-    compact_lines = ["\u2728------ **LEAGUE MOOD (LAST 24 HOURS)** ------\u2728", ""]
-    for index, (lol_name, mode_records, wins, losses, win_rate) in enumerate(ranked_results):
-        display_emoji = "\u2B50" if index == 0 else "\U0001F642"
-        compact_lines.append(f"{display_emoji}  **{lol_name}**  **`{wins}W-{losses}L` - {win_rate:.1f}%**")
-
-    if error_results:
-        compact_lines.append("")
-        error_names = ", ".join(name for name, _ in error_results[:6])
-        more = "" if len(error_results) <= 6 else f" (+{len(error_results) - 6} more)"
-        compact_lines.append(f"\u26AB Riot errors for {len(error_results)} players: {error_names}{more}")
-
-    compact_lines.append("")
-    compact_lines.append("\u2728--------------------------------------------\u2728")
-    compact_lines.append(f"_Last updated: {updated_at}_")
-    compact_text = "\n".join(compact_lines)
-    if len(compact_text) > 2000:
-        compact_text = compact_text[:1950] + "\n..."
-    return compact_text
-
-
-def simplify_riot_error(exc):
-    text = str(exc)
-    if "401" in text and "Unauthorized" in text:
-        return "401 Unauthorized (check RIOT_API_KEY)"
-    if len(text) > 140:
-        return text[:137] + "..."
-    return text
-
-
-async def build_today_win_rate_report(progress_callback=None):
-    today_key = datetime.now(tz=REPORT_TIMEZONE).date().isoformat()
-    now_monotonic = time.monotonic()
-    if (
-        REPORT_CACHE["text"] is not None
-        and REPORT_CACHE["day"] == today_key
-        and now_monotonic < REPORT_CACHE["expires_at"]
-    ):
-        log("[mood] Returning cached report.")
-        return REPORT_CACHE["text"]
-
-    report_start = time.perf_counter()
-    ranked_results = []
-    error_results = []
-
-    if DB_ENABLED:
-        stored_rows = await asyncio.to_thread(db_load_latest_stats)
-        if stored_rows:
-            latest_updated_at = None
-            for row in stored_rows:
-                row_updated_at = row[9]
-                if row_updated_at is None:
-                    continue
-                if latest_updated_at is None or row_updated_at > latest_updated_at:
-                    latest_updated_at = row_updated_at
-
-            snapshot_max_age_seconds = max(600, DAILY_REFRESH_SECONDS * 2)
-            snapshot_stale = True
-            if latest_updated_at is not None:
-                latest_updated_utc = latest_updated_at.astimezone(timezone.utc)
-                snapshot_age = datetime.now(tz=timezone.utc) - latest_updated_utc
-                snapshot_stale = snapshot_age > timedelta(seconds=snapshot_max_age_seconds)
-
-            if snapshot_stale:
-                log("[mood] Snapshot data is stale; falling back to live rebuild.")
-                stored_rows = []
-
-        if stored_rows:
-            for row in stored_rows:
-                riot_id = row[0]
-                if not any(p.casefold() == riot_id.casefold() for p in FRIENDS):
-                    continue
-                mode_records = {
-                    "solo_duo": {"wins": row[1], "losses": row[2]},
-                    "flex": {"wins": row[3], "losses": row[4]},
-                    "arcade": {"wins": row[5], "losses": row[6]},
-                }
-                wins = row[7]
-                losses = row[8]
-                total = wins + losses
-                if total == 0:
-                    continue
-                win_rate = (wins / total) * 100
-                ranked_results.append((get_lol_name(riot_id), mode_records, wins, losses, win_rate))
-
-            ranked_results.sort(key=rank_sort_key)
-            if ranked_results:
-                if len(ranked_results) == 1 and len(FRIENDS) > 1:
-                    log("[mood] Snapshot looked sparse (1 ranked player); falling back to live rebuild.")
-                else:
-                    log("[mood] Returning report from postgres daily stats.")
-                    report_text = format_report_from_results(ranked_results, error_results, report_start)
-                    REPORT_CACHE["text"] = report_text
-                    REPORT_CACHE["day"] = today_key
-                    REPORT_CACHE["expires_at"] = time.monotonic() + max(0, REPORT_CACHE_SECONDS)
-                    return report_text
-
-    MATCH_INFO_CACHE.clear()
-
-    total_players = len(FRIENDS)
-    processed_players = 0
-
-    for riot_id in FRIENDS:
-        lol_name = get_lol_name(riot_id)
-        log(f"[mood] Processing player {lol_name} ({riot_id})")
-        try:
-            mode_records = await get_today_mode_records(riot_id)
-        except requests.RequestException as exc:
-            error_results.append((lol_name, simplify_riot_error(exc)))
-            log(f"[mood] Player failed {lol_name}: {exc}")
-            processed_players += 1
-            if progress_callback is not None:
-                await progress_callback(processed_players, total_players, lol_name)
-            continue
-
-        wins, losses = get_mode_totals(mode_records)
-        total = wins + losses
-        if total == 0:
-            processed_players += 1
-            if progress_callback is not None:
-                await progress_callback(processed_players, total_players, lol_name)
-            continue
-
-        win_rate = (wins / total) * 100
-        ranked_results.append((lol_name, mode_records, wins, losses, win_rate))
-        processed_players += 1
-        if progress_callback is not None:
-            await progress_callback(processed_players, total_players, lol_name)
-
-    ranked_results.sort(key=rank_sort_key)
-
-    report_text = format_report_from_results(ranked_results, error_results, report_start)
-    REPORT_CACHE["text"] = report_text
-    REPORT_CACHE["day"] = today_key
-    REPORT_CACHE["expires_at"] = time.monotonic() + max(0, REPORT_CACHE_SECONDS)
-    return report_text
-
-
-async def refresh_daily_stats_once():
-    if not DB_ENABLED:
-        return
-    log("[refresh] Starting daily stats refresh.")
-    MATCH_INFO_CACHE.clear()
-    for riot_id in FRIENDS:
-        try:
-            await get_today_mode_records(riot_id)
-        except requests.RequestException as exc:
-            log(f"[refresh] Failed for {riot_id}: {exc}")
-    REPORT_CACHE["text"] = None
-    REPORT_CACHE["day"] = None
-    REPORT_CACHE["expires_at"] = 0.0
-    log("[refresh] Daily stats refresh complete.")
-
-
-async def refresh_recent_matches_snapshot(recent_count=3):
-    if not DB_ENABLED:
-        return
-    log(f"[refresh] Running on-demand recent refresh (count={recent_count})")
-    for riot_id in FRIENDS:
-        try:
-            puuid = await fetch_puuid(riot_id)
-            recent_ids = await fetch_recent_match_ids(puuid, count=max(1, recent_count))
-            if not recent_ids:
-                continue
-
-            latest_match_id = recent_ids[0]
-            last_seen_match_id = await asyncio.to_thread(db_get_last_seen_match_id, riot_id)
-            if last_seen_match_id == latest_match_id:
-                continue
-
-            await get_today_mode_records(riot_id)
-        except requests.RequestException as exc:
-            log(f"[refresh] On-demand refresh failed for {riot_id}: {exc}")
-    REPORT_CACHE["text"] = None
-    REPORT_CACHE["day"] = None
-    REPORT_CACHE["expires_at"] = 0.0
-
-
 async def edit_last_report_message():
     channel_id = LAST_REPORT_MESSAGE["channel_id"]
     message_id = LAST_REPORT_MESSAGE["message_id"]
@@ -640,7 +240,7 @@ async def edit_last_report_message():
         return
 
     try:
-        report_text = await build_today_win_rate_report()
+        report_text = await mood_service.build_today_win_rate_report()
         message = await channel.fetch_message(message_id)
         if message.content == report_text:
             log(f"[refresh] No report change; skipped editing message {message_id}.")
@@ -657,6 +257,16 @@ async def edit_last_report_message():
         log(f"[refresh] Discord API error while editing last report message: {exc}")
 
 
+async def daily_report(channel):
+    report_text = await mood_service.build_today_win_rate_report()
+    report_message = await get_or_create_report_message(channel, report_text)
+    if report_message.content != report_text:
+        await report_message.edit(content=report_text)
+        log(f"[scheduler] Updated scoreboard message {report_message.id}.")
+    else:
+        log(f"[scheduler] No scoreboard change; skipped update for {report_message.id}.")
+
+
 async def background_daily_refresher():
     global LAST_CACHE_CLEANUP_AT
     if not DB_ENABLED:
@@ -664,7 +274,7 @@ async def background_daily_refresher():
     while not client.is_closed():
         token = REQUEST_ID_CONTEXT.set(create_request_id("bg"))
         try:
-            await refresh_daily_stats_once()
+            await mood_service.refresh_daily_stats_once()
             await edit_last_report_message()
             now_mono = time.monotonic()
             if (now_mono - LAST_CACHE_CLEANUP_AT) >= max(3600, DAILY_REFRESH_SECONDS):
@@ -679,70 +289,6 @@ async def background_daily_refresher():
         finally:
             REQUEST_ID_CONTEXT.reset(token)
         await asyncio.sleep(max(30, DAILY_REFRESH_SECONDS))
-
-
-async def run_riot_connectivity_test():
-    riot_id = FRIENDS[0]
-    puuid = await fetch_puuid(riot_id)
-    start_time_unix = get_last_24h_start_unix_seconds()
-    match_ids = await fetch_match_ids(puuid, start_time_unix)
-    return riot_id, puuid, len(match_ids)
-
-
-async def run_health_check():
-    uptime_seconds = int(time.monotonic() - START_MONOTONIC)
-    try:
-        db_stats = await asyncio.to_thread(db_health_stats)
-        db_ok = db_stats["db_ok"]
-        cache_entries = db_stats["match_cache_entries"]
-    except Exception as exc:
-        db_ok = False
-        cache_entries = 0
-        log(f"[health] DB health check failed: {exc}")
-
-    return {
-        "uptime_seconds": uptime_seconds,
-        "tracked_players": len(FRIENDS),
-        "db_ok": db_ok,
-        "match_cache_entries": cache_entries,
-        "request_cache_active": REPORT_CACHE["text"] is not None,
-    }
-
-
-async def build_debug_player_report(riot_id):
-    window_start_unix = get_last_24h_start_unix_seconds()
-    normalized = normalize_riot_id(riot_id)
-    puuid = await fetch_puuid(normalized)
-    recent_ids = await fetch_recent_match_ids(puuid, count=20)
-    lines = [
-        f"Player debug (timezone={REPORT_TIMEZONE_NAME}, window=last 24h):",
-        normalized,
-        "match_id | queue | end_time | bucket | in_last_24h",
-    ]
-    inspected = 0
-    for match_id in recent_ids:
-        match_info = await fetch_match_info(match_id)
-        end_ts = get_match_end_unix_seconds(match_info)
-        end_local = datetime.fromtimestamp(end_ts, tz=timezone.utc).astimezone(REPORT_TIMEZONE)
-        queue_id = match_info["info"].get("queueId", -1)
-        bucket = get_mode_bucket(queue_id)
-        in_window = "yes" if end_ts >= window_start_unix else "no"
-        lines.append(f"{match_id} | {queue_id} | {end_local:%d.%m.%Y %H:%M} | {bucket} | {in_window}")
-        inspected += 1
-        if inspected >= 12:
-            break
-
-    return "\n".join(lines)
-
-
-async def daily_report(channel):
-    report_text = await build_today_win_rate_report()
-    report_message = await get_or_create_report_message(channel, report_text)
-    if report_message.content != report_text:
-        await report_message.edit(content=report_text)
-        log(f"[scheduler] Updated scoreboard message {report_message.id}.")
-    else:
-        log(f"[scheduler] No scoreboard change; skipped update for {report_message.id}.")
 
 
 async def scheduler():
@@ -814,7 +360,7 @@ async def on_message(message):
 
     if content == RIOT_TEST_COMMAND:
         try:
-            riot_id, puuid, match_count = await run_riot_connectivity_test()
+            riot_id, puuid, match_count = await riot_client.run_riot_connectivity_test(FRIENDS[0])
             await message.channel.send(
                 f"Riot API test OK for `{riot_id}`. Retrieved puuid and {match_count} matches."
             )
@@ -825,7 +371,7 @@ async def on_message(message):
         return
 
     if content_lower == HEALTH_COMMAND.casefold():
-        stats = await run_health_check()
+        stats = await mood_service.run_health_check(START_MONOTONIC)
         uptime = str(timedelta(seconds=stats["uptime_seconds"]))
         await message.channel.send(
             (
@@ -846,9 +392,13 @@ async def on_message(message):
 
     if content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} "):
         raw_riot_id = content[len(DEBUG_PLAYER_COMMAND):].strip()
-        status_message = await message.channel.send(f"\u23F3 Building debug report for `{raw_riot_id}`...")
+        status_message = await message.channel.send(f"⏳ Building debug report for `{raw_riot_id}`...")
         try:
-            report_text = await build_debug_player_report(raw_riot_id)
+            report_text = await riot_client.build_debug_player_report(
+                raw_riot_id,
+                report_timezone_name=REPORT_TIMEZONE_NAME,
+                normalize_riot_id=normalize_riot_id,
+            )
             if len(report_text) > 1900:
                 report_text = report_text[:1900] + "\n...truncated..."
             await status_message.edit(content=f"```text\n{report_text}\n```")
@@ -869,18 +419,17 @@ async def on_message(message):
 
         try:
             if MOOD_REQUEST_LOCK.locked():
-                await message.channel.send("\u23F3 A mood report is already in progress. Please wait for it to finish.")
+                await message.channel.send("⏳ A mood report is already in progress. Please wait for it to finish.")
                 return
 
             async with MOOD_REQUEST_LOCK:
-                loading_text = "\u23F3 Gathering last 24h match results from Riot..."
+                loading_text = "⏳ Gathering last 24h match results from Riot..."
                 status_message = await get_or_create_report_message(message.channel, loading_text)
                 if status_message.content != loading_text:
                     await status_message.edit(content=loading_text)
                 try:
                     if DB_ENABLED:
-                        # Show stored snapshot immediately.
-                        snapshot_text = await build_today_win_rate_report()
+                        snapshot_text = await mood_service.build_today_win_rate_report()
                         refresh_note = "_Refreshing latest matches..._"
                         snapshot_with_note = f"{snapshot_text}\n\n{refresh_note}"
                         if len(snapshot_with_note) > 2000:
@@ -890,21 +439,20 @@ async def on_message(message):
                         remember_report_message(status_message)
                         log(f"[mood] Sent stored snapshot report in channel {CHANNEL_ID}.")
 
-                        # Refresh latest matches and update the same message after refresh completes.
-                        await refresh_recent_matches_snapshot(recent_count=1)
-                        refreshed_text = await build_today_win_rate_report()
+                        await mood_service.refresh_recent_matches_snapshot(recent_count=1)
+                        refreshed_text = await mood_service.build_today_win_rate_report()
                         if refreshed_text != displayed_text:
                             await status_message.edit(content=refreshed_text)
                             log(f"[mood] Updated report after quick refresh in channel {CHANNEL_ID}.")
                         else:
-                            log(f"[mood] Quick refresh produced no visible report change.")
+                            log("[mood] Quick refresh produced no visible report change.")
                     else:
                         async def progress(done, total, last_name):
                             await status_message.edit(
-                                content=f"\u23F3 Gathering last 24h match results from Riot... ({done}/{total}) `{last_name}`"
+                                content=f"⏳ Gathering last 24h match results from Riot... ({done}/{total}) `{last_name}`"
                             )
 
-                        report_text = await build_today_win_rate_report(progress_callback=progress)
+                        report_text = await mood_service.build_today_win_rate_report(progress_callback=progress)
                         await status_message.edit(content=report_text)
                         remember_report_message(status_message)
                         log(f"[mood] Sent last 24h win rate report in channel {CHANNEL_ID}.")
@@ -934,9 +482,9 @@ async def on_message(message):
             await message.channel.send(f"`{riot_id}` is already tracked.")
             return
 
-        status_message = await message.channel.send(f"\u23F3 Validating `{riot_id}` with Riot API...")
+        status_message = await message.channel.send(f"⏳ Validating `{riot_id}` with Riot API...")
         try:
-            await fetch_puuid(riot_id)
+            await riot_client.fetch_puuid(riot_id)
         except (KeyError, requests.RequestException) as exc:
             await status_message.edit(content=f"Add failed for `{riot_id}`: {exc}")
             return
@@ -950,13 +498,11 @@ async def on_message(message):
 
         await status_message.edit(
             content=(
-                f"\u2705 Added `{riot_id}` and saved to postgres. "
+                f"✅ Added `{riot_id}` and saved to postgres. "
                 f"Total tracked players: {len(FRIENDS)}"
             )
         )
-        REPORT_CACHE["text"] = None
-        REPORT_CACHE["day"] = None
-        REPORT_CACHE["expires_at"] = 0.0
+        mood_service.invalidate_report_cache()
         log(f"[add] Added player {riot_id}.")
 
 

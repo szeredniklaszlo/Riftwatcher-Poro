@@ -1,0 +1,233 @@
+import asyncio
+import time
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
+
+import requests
+
+from src.report_logic import (
+    create_mode_records,
+    get_match_end_unix_seconds,
+    get_mode_bucket,
+    get_mode_totals,
+    is_match_in_last_24h,
+)
+
+
+def split_riot_id(riot_id):
+    game_name, tag_line = riot_id.split("#", 1)
+    return game_name, tag_line
+
+
+def get_lol_name(riot_id):
+    game_name, _ = split_riot_id(riot_id)
+    return game_name
+
+
+def get_last_24h_start_unix_seconds():
+    now_utc = datetime.now(tz=timezone.utc)
+    return int((now_utc - timedelta(hours=24)).timestamp())
+
+
+class RiotApiClient:
+    def __init__(
+        self,
+        *,
+        riot_api_key,
+        log,
+        log_riot_requests,
+        report_timezone,
+        max_matches_per_player,
+        max_today_match_details,
+        db_get_puuid,
+        db_upsert_player,
+        db_get_match_info,
+        db_upsert_match_info,
+        db_set_last_seen_match_id,
+        on_unauthorized=None,
+    ):
+        self.riot_api_key = riot_api_key
+        self.log = log
+        self.log_riot_requests = log_riot_requests
+        self.report_timezone = report_timezone
+        self.max_matches_per_player = max_matches_per_player
+        self.max_today_match_details = max_today_match_details
+        self.db_get_puuid = db_get_puuid
+        self.db_upsert_player = db_upsert_player
+        self.db_get_match_info = db_get_match_info
+        self.db_upsert_match_info = db_upsert_match_info
+        self.db_set_last_seen_match_id = db_set_last_seen_match_id
+        self.on_unauthorized = on_unauthorized
+        self.puuid_cache = {}
+        self.match_info_cache = {}
+
+    def clear_match_cache(self):
+        self.match_info_cache.clear()
+
+    def riot_get_json(self, url):
+        headers = {"X-Riot-Token": self.riot_api_key}
+        max_attempts = 4
+
+        for attempt in range(1, max_attempts + 1):
+            start_time = time.perf_counter()
+            response = requests.get(url, headers=headers, timeout=20)
+            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+            if self.log_riot_requests:
+                self.log(f"[riot] {response.status_code} in {elapsed_ms}ms: {url}")
+
+            if response.status_code != 429:
+                if response.status_code == 401 and self.on_unauthorized is not None:
+                    self.on_unauthorized()
+                response.raise_for_status()
+                return response.json()
+
+            retry_after_header = response.headers.get("Retry-After", "1")
+            try:
+                retry_after = float(retry_after_header)
+            except ValueError:
+                retry_after = 1.0
+
+            if attempt == max_attempts:
+                response.raise_for_status()
+
+            sleep_seconds = max(1.0, retry_after)
+            self.log(f"[riot] 429 received. attempt={attempt}/{max_attempts}, sleep={sleep_seconds}s")
+            time.sleep(sleep_seconds)
+
+    async def riot_get_json_async(self, url):
+        return await asyncio.to_thread(self.riot_get_json, url)
+
+    async def fetch_puuid(self, riot_id):
+        cache_key = riot_id.casefold()
+        if cache_key in self.puuid_cache:
+            return self.puuid_cache[cache_key]
+
+        persisted_puuid = await asyncio.to_thread(self.db_get_puuid, riot_id)
+        if persisted_puuid:
+            self.puuid_cache[cache_key] = persisted_puuid
+            return persisted_puuid
+
+        game_name, tag_line = split_riot_id(riot_id)
+        encoded_name = quote(game_name, safe="")
+        encoded_tag = quote(tag_line, safe="")
+        url = (
+            "https://europe.api.riotgames.com/riot/account/v1/accounts/by-riot-id/"
+            f"{encoded_name}/{encoded_tag}"
+        )
+        data = await self.riot_get_json_async(url)
+        puuid = data["puuid"]
+        self.puuid_cache[cache_key] = puuid
+        await asyncio.to_thread(self.db_upsert_player, riot_id, puuid)
+        return puuid
+
+    async def fetch_match_ids(self, puuid, start_time_unix):
+        count = max(1, min(self.max_matches_per_player, 100))
+        url = (
+            "https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/"
+            f"{puuid}/ids?startTime={start_time_unix}&count={count}"
+        )
+        return await self.riot_get_json_async(url)
+
+    async def fetch_recent_match_ids(self, puuid, count=20):
+        safe_count = max(1, min(count, 100))
+        url = (
+            "https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/"
+            f"{puuid}/ids?count={safe_count}"
+        )
+        return await self.riot_get_json_async(url)
+
+    async def fetch_match_info(self, match_id):
+        cached = self.match_info_cache.get(match_id)
+        if cached is not None:
+            return cached
+
+        persisted = await asyncio.to_thread(self.db_get_match_info, match_id)
+        if persisted is not None:
+            self.match_info_cache[match_id] = persisted
+            return persisted
+
+        url = f"https://europe.api.riotgames.com/lol/match/v5/matches/{match_id}"
+        match_info = await self.riot_get_json_async(url)
+        self.match_info_cache[match_id] = match_info
+        await asyncio.to_thread(self.db_upsert_match_info, match_id, match_info)
+        return match_info
+
+    @staticmethod
+    def get_participant_win(match_info, puuid):
+        for participant in match_info["info"]["participants"]:
+            if participant["puuid"] == puuid:
+                return participant["win"]
+        return None
+
+    async def get_today_mode_records(self, riot_id):
+        player_start = time.perf_counter()
+        puuid = await self.fetch_puuid(riot_id)
+        start_time_unix = get_last_24h_start_unix_seconds()
+        match_ids = await self.fetch_match_ids(puuid, start_time_unix)
+        if match_ids:
+            await asyncio.to_thread(self.db_set_last_seen_match_id, riot_id, match_ids[0])
+
+        mode_records = create_mode_records()
+        today_details_processed = 0
+        for match_id in match_ids:
+            match_info = await self.fetch_match_info(match_id)
+            if not is_match_in_last_24h(match_info):
+                continue
+
+            if today_details_processed >= max(1, self.max_today_match_details):
+                self.log(
+                    f"[mood] {riot_id}: reached MAX_TODAY_MATCH_DETAILS={self.max_today_match_details}, "
+                    "stopping further today match processing."
+                )
+                break
+
+            queue_id = match_info["info"].get("queueId", -1)
+            bucket_name = get_mode_bucket(queue_id)
+            result = self.get_participant_win(match_info, puuid)
+            if result is True:
+                mode_records[bucket_name]["wins"] += 1
+            elif result is False:
+                mode_records[bucket_name]["losses"] += 1
+            today_details_processed += 1
+
+        wins, losses = get_mode_totals(mode_records)
+        elapsed_ms = int((time.perf_counter() - player_start) * 1000)
+        self.log(
+            f"[mood] {riot_id}: matches={len(match_ids)} total={wins}W-{losses}L "
+            f"solo={mode_records['solo_duo']['wins']}W-{mode_records['solo_duo']['losses']}L "
+            f"flex={mode_records['flex']['wins']}W-{mode_records['flex']['losses']}L "
+            f"arcade={mode_records['arcade']['wins']}W-{mode_records['arcade']['losses']}L "
+            f"elapsed={elapsed_ms}ms"
+        )
+        return mode_records
+
+    async def run_riot_connectivity_test(self, riot_id):
+        puuid = await self.fetch_puuid(riot_id)
+        start_time_unix = get_last_24h_start_unix_seconds()
+        match_ids = await self.fetch_match_ids(puuid, start_time_unix)
+        return riot_id, puuid, len(match_ids)
+
+    async def build_debug_player_report(self, riot_id, report_timezone_name, normalize_riot_id):
+        window_start_unix = get_last_24h_start_unix_seconds()
+        normalized = normalize_riot_id(riot_id)
+        puuid = await self.fetch_puuid(normalized)
+        recent_ids = await self.fetch_recent_match_ids(puuid, count=20)
+        lines = [
+            f"Player debug (timezone={report_timezone_name}, window=last 24h):",
+            normalized,
+            "match_id | queue | end_time | bucket | in_last_24h",
+        ]
+        inspected = 0
+        for match_id in recent_ids:
+            match_info = await self.fetch_match_info(match_id)
+            end_ts = get_match_end_unix_seconds(match_info)
+            end_local = datetime.fromtimestamp(end_ts, tz=timezone.utc).astimezone(self.report_timezone)
+            queue_id = match_info["info"].get("queueId", -1)
+            bucket = get_mode_bucket(queue_id)
+            in_window = "yes" if end_ts >= window_start_unix else "no"
+            lines.append(f"{match_id} | {queue_id} | {end_local:%d.%m.%Y %H:%M} | {bucket} | {in_window}")
+            inspected += 1
+            if inspected >= 12:
+                break
+
+        return "\n".join(lines)
