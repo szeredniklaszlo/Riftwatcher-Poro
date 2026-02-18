@@ -108,7 +108,7 @@ async def send_riot_key_expired_alert():
     if channel is None:
         return
     await channel.send(
-        "@NoxVain âš ï¸ Riot API returned 401 Unauthorized. "
+        "@NoxVain \u26A0\uFE0F Riot API returned 401 Unauthorized. "
         "Your RIOT_API_KEY is likely expired or invalid. "
         "Update the Railway variable `RIOT_API_KEY`."
     )
@@ -389,9 +389,28 @@ async def background_match_recap_notifier():
 
                 if DB_ENABLED:
                     try:
-                        await mood_service.refresh_recent_matches_snapshot(recent_count=20)
+                        cycle_key = mood_service.get_cycle_key()
+                        affected_riot_ids = set()
+                        for _end_ts, _match_id, _queue_id, _duration_seconds, tracked_participants in match_entries:
+                            for riot_id, _participant in tracked_participants:
+                                affected_riot_ids.add(riot_id)
+
+                        for riot_id in sorted(affected_riot_ids, key=str.casefold):
+                            mode_records, performance_totals = await riot_client.get_today_mode_records(riot_id)
+                            await asyncio.to_thread(
+                                db_upsert_daily_stats,
+                                cycle_key,
+                                riot_id,
+                                mode_records,
+                                performance_totals,
+                            )
+
+                        mood_service.invalidate_report_cache()
                         await edit_last_report_message(bypass_cache=True)
-                        log("[recap] Synced daily report after posting new match recap(s).")
+                        log(
+                            f"[recap] Synced daily report after posting new match recap(s). "
+                            f"affected_players={len(affected_riot_ids)}"
+                        )
                     except Exception as exc:
                         log(f"[recap] Failed to sync daily report after recap: {exc}")
         except Exception as exc:
@@ -575,7 +594,7 @@ async def on_message(message):
 
     if content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} "):
         raw_riot_id = content[len(DEBUG_PLAYER_COMMAND):].strip()
-        status_message = await message.channel.send(f"â³ Building debug report for `{raw_riot_id}`...")
+        status_message = await message.channel.send(f"\u23F3 Building debug report for `{raw_riot_id}`...")
         try:
             report_text = await riot_client.build_debug_player_report(
                 raw_riot_id,
@@ -602,12 +621,12 @@ async def on_message(message):
 
         try:
             if MOOD_REQUEST_LOCK.locked():
-                await message.channel.send("â³ A mood report is already in progress. Please wait for it to finish.")
+                await message.channel.send("\u23F3 A mood report is already in progress. Please wait for it to finish.")
                 return
 
             async with MOOD_REQUEST_LOCK:
                 loading_text = (
-                    f"â³ Gathering match results since {REPORT_DAY_START_HOUR:02d}:00 from Riot..."
+                    f"\u23F3 Gathering match results since {REPORT_DAY_START_HOUR:02d}:00 from Riot..."
                 )
                 status_message = await get_or_create_report_message(message.channel, loading_text)
                 if status_message.content != loading_text:
@@ -635,7 +654,7 @@ async def on_message(message):
                         async def progress(done, total, last_name):
                             await status_message.edit(
                                 content=(
-                                    f"â³ Gathering match results since {REPORT_DAY_START_HOUR:02d}:00 "
+                                    f"\u23F3 Gathering match results since {REPORT_DAY_START_HOUR:02d}:00 "
                                     f"from Riot... ({done}/{total}) `{last_name}`"
                                 )
                             )
@@ -673,7 +692,7 @@ async def on_message(message):
             await message.channel.send(f"`{riot_id}` is already tracked.")
             return
 
-        status_message = await message.channel.send(f"â³ Validating `{riot_id}` with Riot API...")
+        status_message = await message.channel.send(f"\u23F3 Validating `{riot_id}` with Riot API...")
         try:
             await riot_client.fetch_puuid(riot_id)
         except (KeyError, requests.RequestException) as exc:
@@ -689,7 +708,7 @@ async def on_message(message):
 
         await status_message.edit(
             content=(
-                f"âœ… Added `{riot_id}` and saved to postgres. "
+                f"\u2705 Added `{riot_id}` and saved to postgres. "
                 f"Total tracked players: {len(FRIENDS)}"
             )
         )
