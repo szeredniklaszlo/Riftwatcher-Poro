@@ -5,7 +5,10 @@ MoodBot is a Discord bot that tracks League match mood for a tracked player list
 ## Current Structure
 
 - `src/app.py` - module entrypoint used by Railway
-- `src/discord_bot.py` - main bot runtime (Discord handlers, Riot calls, refresh logic)
+- `src/discord_bot.py` - Discord runtime and command handlers
+- `src/config.py` - environment/config loading
+- `src/db.py` - Postgres pool and persistence layer
+- `src/report_logic.py` - pure ranking and formatting helpers
 - `src/constants.py` - command constants
 - `README.md` - project docs
 

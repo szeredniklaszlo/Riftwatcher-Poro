@@ -1,0 +1,332 @@
+import json
+import queue
+import threading
+
+try:
+    import psycopg
+except ImportError:
+    psycopg = None
+
+from src.config import DATABASE_URL, DB_POOL_SIZE
+
+
+if psycopg is None:
+    raise RuntimeError("DATABASE_URL is set but psycopg is not installed. Add psycopg[binary] to dependencies.")
+
+DB_ENABLED = True
+DB_POOL = None
+DB_POOL_LOCK = threading.Lock()
+DB_POOL_TOTAL = 0
+
+
+def init_db_pool():
+    global DB_POOL
+    if DB_POOL is None:
+        DB_POOL = queue.LifoQueue(maxsize=max(1, DB_POOL_SIZE))
+
+
+def create_db_connection():
+    return psycopg.connect(DATABASE_URL)
+
+
+def db_acquire_connection():
+    global DB_POOL_TOTAL
+    if DB_POOL is None:
+        init_db_pool()
+    try:
+        return DB_POOL.get_nowait()
+    except queue.Empty:
+        pass
+
+    with DB_POOL_LOCK:
+        if DB_POOL_TOTAL < max(1, DB_POOL_SIZE):
+            DB_POOL_TOTAL += 1
+            return create_db_connection()
+
+    return DB_POOL.get()
+
+
+def db_release_connection(conn, discard=False):
+    global DB_POOL_TOTAL
+    if conn is None:
+        return
+    if discard:
+        try:
+            conn.close()
+        finally:
+            with DB_POOL_LOCK:
+                DB_POOL_TOTAL = max(0, DB_POOL_TOTAL - 1)
+        return
+    try:
+        DB_POOL.put_nowait(conn)
+    except queue.Full:
+        try:
+            conn.close()
+        finally:
+            with DB_POOL_LOCK:
+                DB_POOL_TOTAL = max(0, DB_POOL_TOTAL - 1)
+
+
+def db_execute(query, params=None, fetch=False, fetchone=False):
+    conn = db_acquire_connection()
+    discard_conn = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, params or ())
+            if fetchone:
+                result = cur.fetchone()
+                conn.commit()
+                return result
+            if fetch:
+                result = cur.fetchall()
+                conn.commit()
+                return result
+        conn.commit()
+    except Exception:
+        discard_conn = True
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        db_release_connection(conn, discard=discard_conn)
+    return None
+
+
+def init_db():
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS tracked_players (
+            riot_id TEXT PRIMARY KEY,
+            puuid TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS player_daily_stats (
+            day_date DATE NOT NULL,
+            riot_id TEXT NOT NULL,
+            solo_wins INTEGER NOT NULL DEFAULT 0,
+            solo_losses INTEGER NOT NULL DEFAULT 0,
+            flex_wins INTEGER NOT NULL DEFAULT 0,
+            flex_losses INTEGER NOT NULL DEFAULT 0,
+            arcade_wins INTEGER NOT NULL DEFAULT 0,
+            arcade_losses INTEGER NOT NULL DEFAULT 0,
+            total_wins INTEGER NOT NULL DEFAULT 0,
+            total_losses INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (day_date, riot_id)
+        );
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS match_info_cache (
+            match_id TEXT PRIMARY KEY,
+            payload TEXT NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS bot_state (
+            state_key TEXT PRIMARY KEY,
+            state_value TEXT NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """
+    )
+
+
+def db_set_state(state_key, state_value):
+    db_execute(
+        """
+        INSERT INTO bot_state (state_key, state_value, updated_at)
+        VALUES (%s, %s, NOW())
+        ON CONFLICT (state_key)
+        DO UPDATE SET state_value = EXCLUDED.state_value, updated_at = NOW();
+        """,
+        (state_key, state_value),
+    )
+
+
+def db_get_state(state_key):
+    row = db_execute(
+        "SELECT state_value FROM bot_state WHERE state_key = %s LIMIT 1;",
+        (state_key,),
+        fetchone=True,
+    )
+    if not row:
+        return None
+    return row[0]
+
+
+def db_set_last_report_message(channel_id, message_id):
+    db_set_state("last_report_channel_id", str(channel_id))
+    db_set_state("last_report_message_id", str(message_id))
+
+
+def db_get_last_report_message():
+    channel_id = db_get_state("last_report_channel_id")
+    message_id = db_get_state("last_report_message_id")
+    if not channel_id or not message_id:
+        return None, None
+    try:
+        return int(channel_id), int(message_id)
+    except ValueError:
+        return None, None
+
+
+def db_last_seen_match_key(riot_id):
+    return f"last_seen_match_id::{riot_id.casefold()}"
+
+
+def db_get_last_seen_match_id(riot_id):
+    return db_get_state(db_last_seen_match_key(riot_id))
+
+
+def db_set_last_seen_match_id(riot_id, match_id):
+    db_set_state(db_last_seen_match_key(riot_id), match_id)
+
+
+def db_get_match_info(match_id):
+    row = db_execute(
+        "SELECT payload FROM match_info_cache WHERE match_id = %s LIMIT 1;",
+        (match_id,),
+        fetchone=True,
+    )
+    if not row or not row[0]:
+        return None
+    try:
+        return json.loads(row[0])
+    except json.JSONDecodeError:
+        return None
+
+
+def db_upsert_match_info(match_id, match_info):
+    payload = json.dumps(match_info, separators=(",", ":"))
+    db_execute(
+        """
+        INSERT INTO match_info_cache (match_id, payload, updated_at)
+        VALUES (%s, %s, NOW())
+        ON CONFLICT (match_id)
+        DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW();
+        """,
+        (match_id, payload),
+    )
+
+
+def db_cleanup_old_match_cache(retention_days):
+    row = db_execute(
+        """
+        DELETE FROM match_info_cache
+        WHERE updated_at < NOW() - (%s * INTERVAL '1 day')
+        RETURNING match_id;
+        """,
+        (max(1, retention_days),),
+        fetch=True,
+    ) or []
+    return len(row)
+
+
+def db_health_stats():
+    ping = db_execute("SELECT 1;", fetchone=True)
+    count_row = db_execute("SELECT COUNT(*) FROM match_info_cache;", fetchone=True)
+    count = int(count_row[0]) if count_row and count_row[0] is not None else 0
+    return {"db_ok": bool(ping and ping[0] == 1), "match_cache_entries": count}
+
+
+def db_upsert_player(riot_id, puuid=None):
+    db_execute(
+        """
+        INSERT INTO tracked_players (riot_id, puuid, created_at, updated_at)
+        VALUES (%s, %s, NOW(), NOW())
+        ON CONFLICT (riot_id)
+        DO UPDATE SET
+            puuid = COALESCE(EXCLUDED.puuid, tracked_players.puuid),
+            updated_at = NOW();
+        """,
+        (riot_id, puuid),
+    )
+
+
+def db_get_puuid(riot_id):
+    row = db_execute(
+        "SELECT puuid FROM tracked_players WHERE lower(riot_id) = lower(%s) LIMIT 1;",
+        (riot_id,),
+        fetchone=True,
+    )
+    if row and row[0]:
+        return row[0]
+    return None
+
+
+def db_load_tracked_players():
+    rows = db_execute("SELECT riot_id FROM tracked_players ORDER BY riot_id;", fetch=True) or []
+    return [row[0] for row in rows]
+
+
+def db_upsert_daily_stats(day_date, riot_id, mode_records):
+    solo_wins = mode_records["solo_duo"]["wins"]
+    solo_losses = mode_records["solo_duo"]["losses"]
+    flex_wins = mode_records["flex"]["wins"]
+    flex_losses = mode_records["flex"]["losses"]
+    arcade_wins = mode_records["arcade"]["wins"]
+    arcade_losses = mode_records["arcade"]["losses"]
+    total_wins = solo_wins + flex_wins + arcade_wins
+    total_losses = solo_losses + flex_losses + arcade_losses
+    db_execute(
+        """
+        INSERT INTO player_daily_stats (
+            day_date, riot_id,
+            solo_wins, solo_losses,
+            flex_wins, flex_losses,
+            arcade_wins, arcade_losses,
+            total_wins, total_losses,
+            updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (day_date, riot_id)
+        DO UPDATE SET
+            solo_wins = EXCLUDED.solo_wins,
+            solo_losses = EXCLUDED.solo_losses,
+            flex_wins = EXCLUDED.flex_wins,
+            flex_losses = EXCLUDED.flex_losses,
+            arcade_wins = EXCLUDED.arcade_wins,
+            arcade_losses = EXCLUDED.arcade_losses,
+            total_wins = EXCLUDED.total_wins,
+            total_losses = EXCLUDED.total_losses,
+            updated_at = NOW();
+        """,
+        (
+            day_date,
+            riot_id,
+            solo_wins,
+            solo_losses,
+            flex_wins,
+            flex_losses,
+            arcade_wins,
+            arcade_losses,
+            total_wins,
+            total_losses,
+        ),
+    )
+
+
+def db_load_latest_stats():
+    rows = db_execute(
+        """
+        SELECT DISTINCT ON (lower(riot_id))
+            riot_id, solo_wins, solo_losses, flex_wins, flex_losses,
+            arcade_wins, arcade_losses, total_wins, total_losses, updated_at
+        FROM player_daily_stats
+        ORDER BY lower(riot_id), updated_at DESC;
+        """,
+        fetch=True,
+    )
+    return rows or []
