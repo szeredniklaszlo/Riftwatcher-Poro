@@ -330,16 +330,13 @@ class MoodService:
 
                 ranked_results.sort(key=rank_sort_key)
                 if ranked_results or prefer_snapshot:
-                    if not prefer_snapshot and len(ranked_results) == 1 and len(self.friends) > 1:
-                        self.log("[mood] Snapshot looked sparse (1 ranked player); falling back to live rebuild.")
-                    else:
-                        self.log("[mood] Returning report from postgres daily stats.")
-                        report_text = self.format_report_from_results(ranked_results, error_results, report_start)
-                        if not bypass_cache:
-                            self.report_cache["text"] = report_text
-                            self.report_cache["day"] = cycle_key
-                            self.report_cache["expires_at"] = time.monotonic() + max(0, self.report_cache_seconds)
-                        return report_text
+                    self.log("[mood] Returning report from postgres daily stats.")
+                    report_text = self.format_report_from_results(ranked_results, error_results, report_start)
+                    if not bypass_cache:
+                        self.report_cache["text"] = report_text
+                        self.report_cache["day"] = cycle_key
+                        self.report_cache["expires_at"] = time.monotonic() + max(0, self.report_cache_seconds)
+                    return report_text
             elif prefer_snapshot:
                 report_text = self.format_report_from_results(ranked_results, error_results, report_start)
                 if not bypass_cache:

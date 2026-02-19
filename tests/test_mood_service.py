@@ -185,7 +185,7 @@ def test_build_report_falls_back_to_live_when_snapshot_stale():
     assert riot.get_today_mode_records_calls == ["Alpha#NA1"]
 
 
-def test_build_report_falls_back_to_live_when_snapshot_sparse():
+def test_build_report_uses_snapshot_when_only_one_player_has_ranked_games():
     riot = FakeRiotClient()
     riot.today_records_by_riot_id["Alpha#NA1"] = (
         {"solo_duo": {"wins": 2, "losses": 0}, "flex": {"wins": 0, "losses": 0}, "arcade": {"wins": 0, "losses": 0}},
@@ -225,8 +225,8 @@ def test_build_report_falls_back_to_live_when_snapshot_sparse():
     report = asyncio.run(service.build_today_win_rate_report())
 
     assert "Alpha" in report
-    assert "Bravo" in report
-    assert riot.get_today_mode_records_calls == ["Bravo#NA1", "Alpha#NA1"]
+    assert "Bravo" not in report
+    assert riot.get_today_mode_records_calls == []
 
 
 def test_refresh_recent_matches_snapshot_updates_baseline_stats():
