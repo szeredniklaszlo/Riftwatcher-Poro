@@ -82,7 +82,7 @@ Optional:
 - `REPORT_TIMEZONE` (default: `UTC`, example: `Europe/Oslo`)
 - `LOG_RIOT_REQUESTS` (default: `false`)
 - `LOG_JSON` (default: `false`)
-- `MAX_TODAY_MATCH_DETAILS` (default: `20`)
+- `MAX_TODAY_MATCH_DETAILS` (default: `100`)
 - `REPORT_DAY_START_HOUR` (default: `6`)
 - `MAX_MATCH_IDS_SCAN` (default: `2000`; set `0` for no cap)
 - `MAX_IN_MEMORY_MATCH_CACHE` (default: `200`)
