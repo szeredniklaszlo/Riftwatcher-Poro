@@ -26,15 +26,41 @@ def get_env_bool(name, default=False):
     raw = os.getenv(name)
     if raw is None:
         return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    value = raw.strip()
+    if not value:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def get_env_int(name, default):
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid integer for {name}: {raw!r}") from exc
+
+
+def get_env_str(name, default):
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    if not value:
+        return default
+    return value
 
 
 TOKEN = require_env("DISCORD_TOKEN")
 RIOT_API_KEY = require_env("RIOT_API_KEY")
-RIOT_PLATFORM_ROUTING = os.getenv("RIOT_PLATFORM_ROUTING", "euw1").strip().lower() or "euw1"
+RIOT_PLATFORM_ROUTING = get_env_str("RIOT_PLATFORM_ROUTING", "euw1").lower()
 DAILY_REPORT_CHANNEL_ID = int(require_env("DAILY_REPORT_CHANNEL_ID"))
 EVENTS_CHANNEL_ID = int(require_env("EVENTS_CHANNEL_ID"))
-REPORT_TIMEZONE_NAME = os.getenv("REPORT_TIMEZONE", "UTC")
+REPORT_TIMEZONE_NAME = get_env_str("REPORT_TIMEZONE", "UTC")
 try:
     REPORT_TIMEZONE = ZoneInfo(REPORT_TIMEZONE_NAME)
 except Exception as exc:
@@ -42,16 +68,16 @@ except Exception as exc:
 
 LOG_RIOT_REQUESTS = get_env_bool("LOG_RIOT_REQUESTS", False)
 LOG_JSON = get_env_bool("LOG_JSON", False)
-REPORT_CACHE_SECONDS = int(os.getenv("REPORT_CACHE_SECONDS", "120"))
-MAX_TODAY_MATCH_DETAILS = int(os.getenv("MAX_TODAY_MATCH_DETAILS", "20"))
-MAX_MATCH_IDS_SCAN = int(os.getenv("MAX_MATCH_IDS_SCAN", "2000"))
-MAX_IN_MEMORY_MATCH_CACHE = int(os.getenv("MAX_IN_MEMORY_MATCH_CACHE", "200"))
-REPORT_DAY_START_HOUR = int(os.getenv("REPORT_DAY_START_HOUR", "6"))
+REPORT_CACHE_SECONDS = get_env_int("REPORT_CACHE_SECONDS", 120)
+MAX_TODAY_MATCH_DETAILS = get_env_int("MAX_TODAY_MATCH_DETAILS", 20)
+MAX_MATCH_IDS_SCAN = get_env_int("MAX_MATCH_IDS_SCAN", 2000)
+MAX_IN_MEMORY_MATCH_CACHE = get_env_int("MAX_IN_MEMORY_MATCH_CACHE", 200)
+REPORT_DAY_START_HOUR = get_env_int("REPORT_DAY_START_HOUR", 6)
 if REPORT_DAY_START_HOUR < 0 or REPORT_DAY_START_HOUR > 23:
     raise RuntimeError("REPORT_DAY_START_HOUR must be between 0 and 23.")
-DAILY_REFRESH_SECONDS = int(os.getenv("DAILY_REFRESH_SECONDS", "300"))
-MATCH_CACHE_RETENTION_DAYS = int(os.getenv("MATCH_CACHE_RETENTION_DAYS", "730"))
+DAILY_REFRESH_SECONDS = get_env_int("DAILY_REFRESH_SECONDS", 300)
+MATCH_CACHE_RETENTION_DAYS = get_env_int("MATCH_CACHE_RETENTION_DAYS", 730)
 MATCH_RECAP_CHANNEL_ID = int(require_env("MATCH_RECAP_CHANNEL_ID"))
-MATCH_RECAP_POLL_SECONDS = int(os.getenv("MATCH_RECAP_POLL_SECONDS", "90"))
+MATCH_RECAP_POLL_SECONDS = get_env_int("MATCH_RECAP_POLL_SECONDS", 90)
 DATABASE_URL = require_env("DATABASE_URL")
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+DB_POOL_SIZE = get_env_int("DB_POOL_SIZE", 5)
