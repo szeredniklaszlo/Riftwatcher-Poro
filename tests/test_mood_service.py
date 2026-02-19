@@ -226,7 +226,7 @@ def test_build_report_falls_back_to_live_when_snapshot_sparse():
 
     assert "Alpha" in report
     assert "Bravo" in report
-    assert riot.get_today_mode_records_calls == ["Alpha#NA1", "Bravo#NA1"]
+    assert riot.get_today_mode_records_calls == ["Bravo#NA1", "Alpha#NA1"]
 
 
 def test_refresh_recent_matches_snapshot_updates_baseline_stats():
@@ -350,3 +350,34 @@ def test_refresh_recent_matches_snapshot_falls_back_when_baseline_missing():
     assert last_seen_writes == [("Alpha#NA1", "m2")]
     assert riot.get_today_mode_records_calls == ["Alpha#NA1"]
     assert service.report_cache["text"] is None
+
+
+def test_refresh_daily_stats_once_starts_with_oldest_collected_player():
+    riot = FakeRiotClient()
+    riot.today_records_by_riot_id["Alpha#NA1"] = (
+        {"solo_duo": {"wins": 1, "losses": 0}, "flex": {"wins": 0, "losses": 0}, "arcade": {"wins": 0, "losses": 0}},
+        {"cs_total": 0, "minutes_total": 0.0},
+    )
+    riot.today_records_by_riot_id["Bravo#NA1"] = (
+        {"solo_duo": {"wins": 0, "losses": 1}, "flex": {"wins": 0, "losses": 0}, "arcade": {"wins": 0, "losses": 0}},
+        {"cs_total": 0, "minutes_total": 0.0},
+    )
+    riot.today_records_by_riot_id["Charlie#NA1"] = (
+        {"solo_duo": {"wins": 2, "losses": 0}, "flex": {"wins": 0, "losses": 0}, "arcade": {"wins": 0, "losses": 0}},
+        {"cs_total": 0, "minutes_total": 0.0},
+    )
+
+    now = datetime.now(tz=timezone.utc)
+    rows = [
+        _stats_row("Alpha#NA1", now - timedelta(minutes=5), solo_wins=1),
+        _stats_row("Bravo#NA1", now - timedelta(minutes=20), solo_losses=1),
+    ]
+    service = _create_service(
+        friends=["Alpha#NA1", "Bravo#NA1", "Charlie#NA1"],
+        riot_client=riot,
+        db_load_latest_stats=lambda _cycle_key: rows,
+    )
+
+    asyncio.run(service.refresh_daily_stats_once())
+
+    assert riot.get_today_mode_records_calls == ["Charlie#NA1", "Bravo#NA1", "Alpha#NA1"]

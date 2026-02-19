@@ -102,6 +102,31 @@ class MoodService:
             day_start_hour=self.report_day_start_hour,
         )
 
+    async def get_players_ordered_by_oldest_stats(self, cycle_key):
+        players = list(self.friends)
+        if not self.db_enabled:
+            return players
+
+        try:
+            stored_rows = await asyncio.to_thread(self.db_load_latest_stats, cycle_key)
+        except Exception as exc:
+            self.log(f"[refresh] Could not load stats ordering from DB: {exc}")
+            return players
+
+        updated_at_by_riot_id = {}
+        for row in stored_rows or []:
+            riot_id = row[0]
+            updated_at = row[9] if len(row) > 9 else None
+            updated_at_by_riot_id[str(riot_id).casefold()] = updated_at
+
+        def sort_key(riot_id):
+            updated_at = updated_at_by_riot_id.get(riot_id.casefold())
+            if updated_at is None:
+                return (0, datetime.min.replace(tzinfo=timezone.utc), riot_id.casefold())
+            return (1, updated_at.astimezone(timezone.utc), riot_id.casefold())
+
+        return sorted(players, key=sort_key)
+
     @staticmethod
     def with_derived_performance(performance_totals):
         data = dict(performance_totals)
@@ -327,7 +352,8 @@ class MoodService:
         total_players = len(self.friends)
         processed_players = 0
 
-        for riot_id in self.friends:
+        ordered_players = await self.get_players_ordered_by_oldest_stats(cycle_key)
+        for riot_id in ordered_players:
             lol_name = get_lol_name(riot_id)
             self.log(f"[mood] Processing player {lol_name} ({riot_id})")
             try:
@@ -376,7 +402,8 @@ class MoodService:
         cycle_key = self.get_cycle_key()
         total_players = len(self.friends)
         processed_players = 0
-        for riot_id in self.friends:
+        ordered_players = await self.get_players_ordered_by_oldest_stats(cycle_key)
+        for riot_id in ordered_players:
             try:
                 mode_records, performance_totals = await self.riot_client.get_today_mode_records(riot_id)
                 await asyncio.to_thread(
