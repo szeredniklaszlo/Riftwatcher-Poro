@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 
 import discord
@@ -178,7 +179,7 @@ async def handle_incoming_message(
 
         friends.append(riot_id)
         try:
-            db_upsert_player(riot_id, None)
+            await asyncio.to_thread(db_upsert_player, riot_id, None)
         except Exception as exc:
             await status_message.edit(content=f"Added `{riot_id}`, but failed to persist to postgres: {exc}")
             return
