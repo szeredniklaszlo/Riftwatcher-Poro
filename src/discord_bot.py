@@ -10,12 +10,12 @@ import requests
 from src import config as cfg
 from src import db as dbm
 from src.discord_command_handlers import handle_incoming_message
+from src.discord_rank_worker import process_rank_cycle
 from src.discord_recap_worker import process_recap_cycle
 from src.discord_text import (
     create_request_id,
     report_signature,
 )
-from src.rank_logic import format_rank_change_message, normalize_queue_type
 from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, MOOD_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND
 from src.mood_service import MoodService
 from src.riot_api import RiotApiClient
@@ -276,61 +276,19 @@ async def daily_report(channel):
         log(f"[scheduler] No scoreboard change; skipped update for {report_message.id}.")
 
 
-def db_ranked_row_to_entry(row):
-    return {
-        "tier": row[1],
-        "rank_division": row[2],
-        "league_points": int(row[3] or 0),
-        "wins": int(row[4] or 0),
-        "losses": int(row[5] or 0),
-        "hot_streak": bool(row[6]),
-        "veteran": bool(row[7]),
-        "fresh_blood": bool(row[8]),
-        "inactive": bool(row[9]),
-    }
-
-
 async def evaluate_rank_changes_and_notify():
     channel = await resolve_channel(CHANNEL_ID)
     if channel is None:
         return
-
-    for riot_id in FRIENDS:
-        try:
-            previous_rows = await asyncio.to_thread(db_load_ranked_state, riot_id)
-            previous_by_queue = {row[0]: db_ranked_row_to_entry(row) for row in previous_rows}
-
-            current_entries_raw = await riot_client.fetch_ranked_entries(riot_id)
-            current_by_queue = {}
-            for entry in current_entries_raw:
-                queue_type = normalize_queue_type(entry.get("queueType"))
-                if queue_type is None:
-                    continue
-                current_by_queue[queue_type] = entry
-
-            # First observation for this player: persist baseline without notifications.
-            if not previous_by_queue:
-                for queue_type, entry in current_by_queue.items():
-                    await asyncio.to_thread(db_upsert_ranked_state, riot_id, queue_type, entry)
-                continue
-
-            for queue_type in sorted(set(previous_by_queue.keys()) | set(current_by_queue.keys())):
-                previous_entry = previous_by_queue.get(queue_type)
-                current_entry = current_by_queue.get(queue_type)
-                message = format_rank_change_message(riot_id, queue_type, previous_entry, current_entry)
-                if message:
-                    await channel.send(message)
-                    log(f"[rank] Rank change posted for {riot_id} ({queue_type}).")
-
-            for queue_type, entry in current_by_queue.items():
-                await asyncio.to_thread(db_upsert_ranked_state, riot_id, queue_type, entry)
-            for queue_type in previous_by_queue.keys():
-                if queue_type not in current_by_queue:
-                    await asyncio.to_thread(db_delete_ranked_state_queue, riot_id, queue_type)
-        except requests.RequestException as exc:
-            log(f"[rank] Failed rank-check for {riot_id}: {exc}")
-        except Exception as exc:
-            log(f"[rank] Unexpected rank-check error for {riot_id}: {exc}")
+    await process_rank_cycle(
+        friends=FRIENDS,
+        channel=channel,
+        riot_client=riot_client,
+        db_load_ranked_state=db_load_ranked_state,
+        db_upsert_ranked_state=db_upsert_ranked_state,
+        db_delete_ranked_state_queue=db_delete_ranked_state_queue,
+        log=log,
+    )
 
 
 async def background_rank_notifier():

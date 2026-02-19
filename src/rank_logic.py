@@ -1,5 +1,6 @@
 RANKED_QUEUE_LABELS = {
     "RANKED_SOLO_5x5": "Ranked Solo/Duo",
+    "RANKED_SOLO_5X5": "Ranked Solo/Duo",
     "RANKED_FLEX_SR": "Ranked Flex",
 }
 
@@ -22,6 +23,8 @@ APEX_TIERS = {"MASTER", "GRANDMASTER", "CHALLENGER"}
 
 def normalize_queue_type(queue_type):
     queue = str(queue_type or "").strip().upper()
+    if queue == "RANKED_SOLO_5X5":
+        return "RANKED_SOLO_5X5"
     if queue in RANKED_QUEUE_LABELS:
         return queue
     return None
@@ -70,7 +73,8 @@ def format_rank(entry):
 
 def format_rank_change_message(riot_id, queue_type, previous_entry, current_entry):
     name = riot_id.split("#", 1)[0]
-    queue_label = RANKED_QUEUE_LABELS.get(queue_type, queue_type)
+    normalized_queue = normalize_queue_type(queue_type) or queue_type
+    queue_label = RANKED_QUEUE_LABELS.get(normalized_queue, normalized_queue)
     direction = compare_rank_direction(previous_entry, current_entry)
     old_rank = format_rank(previous_entry)
     new_rank = format_rank(current_entry)
