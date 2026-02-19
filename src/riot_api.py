@@ -194,12 +194,28 @@ class RiotApiClient:
             f"/lol/summoner/v4/summoners/by-puuid/{puuid}"
         )
         data = await self.riot_get_json_async(url)
-        summoner_id = data["id"]
+        summoner_id = data.get("id") or data.get("summonerId")
+        if not summoner_id:
+            if isinstance(data, dict):
+                keys = ", ".join(sorted(data.keys()))
+                raise RuntimeError(f"Summoner lookup missing encrypted id fields; keys={keys}")
+            raise RuntimeError(f"Summoner lookup returned unexpected payload type: {type(data).__name__}")
         self.summoner_id_cache[puuid] = summoner_id
         return summoner_id
 
     async def fetch_ranked_entries(self, riot_id):
         puuid = await self.fetch_puuid(riot_id)
+        by_puuid_url = (
+            f"https://{self.riot_platform_routing}.api.riotgames.com"
+            f"/lol/league/v4/entries/by-puuid/{puuid}"
+        )
+        try:
+            return await self.riot_get_json_async(by_puuid_url)
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            if status_code not in {404, 405}:
+                raise
+
         summoner_id = await self.fetch_summoner_id(puuid)
         url = (
             f"https://{self.riot_platform_routing}.api.riotgames.com"
