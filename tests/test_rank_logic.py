@@ -17,6 +17,23 @@ def test_compare_rank_direction_handles_ranked_to_unranked():
     assert compare_rank_direction(None, old_rank) == 1
 
 
+def test_format_rank_change_message_skips_unranked_transitions():
+    msg_ranked_from_unranked = format_rank_change_message(
+        "Alpha#NA1",
+        "RANKED_SOLO_5x5",
+        None,
+        {"tier": "SILVER", "rank_division": "II"},
+    )
+    msg_unranked_from_ranked = format_rank_change_message(
+        "Alpha#NA1",
+        "RANKED_SOLO_5x5",
+        {"tier": "GOLD", "rank_division": "IV"},
+        None,
+    )
+    assert msg_ranked_from_unranked is None
+    assert msg_unranked_from_ranked is None
+
+
 def test_format_rank_change_message_contains_tone_and_queue():
     message_up = format_rank_change_message(
         "Alpha#NA1",

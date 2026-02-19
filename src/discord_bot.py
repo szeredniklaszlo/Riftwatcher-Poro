@@ -277,7 +277,8 @@ async def daily_report(channel):
 
 
 async def evaluate_rank_changes_and_notify():
-    channel = await resolve_channel(CHANNEL_ID)
+    rank_channel_id = MATCH_RECAP_CHANNEL_ID if MATCH_RECAP_CHANNEL_ID else CHANNEL_ID
+    channel = await resolve_channel(rank_channel_id)
     if channel is None:
         return
     await process_rank_cycle(
@@ -443,6 +444,10 @@ async def on_ready():
     log(f"[startup] REPORT_CACHE_SECONDS={REPORT_CACHE_SECONDS}")
     log(f"[startup] MATCH_CACHE_RETENTION_DAYS={MATCH_CACHE_RETENTION_DAYS}")
     log(f"[startup] MATCH_RECAP_CHANNEL_ID={MATCH_RECAP_CHANNEL_ID if MATCH_RECAP_CHANNEL_ID else 'disabled'}")
+    log(
+        f"[startup] RANK_ALERT_CHANNEL_ID="
+        f"{MATCH_RECAP_CHANNEL_ID if MATCH_RECAP_CHANNEL_ID else CHANNEL_ID}"
+    )
     log(f"[startup] MATCH_RECAP_POLL_SECONDS={MATCH_RECAP_POLL_SECONDS}")
     if MATCH_RECAP_CHANNEL_ID and MATCH_RECAP_CHANNEL_ID == CHANNEL_ID:
         log("[startup] Warning: MATCH_RECAP_CHANNEL_ID equals DISCORD_CHANNEL_ID.")

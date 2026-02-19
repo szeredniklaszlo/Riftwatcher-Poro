@@ -72,6 +72,9 @@ def format_rank(entry):
 
 
 def format_rank_change_message(riot_id, queue_type, previous_entry, current_entry):
+    # Treat unranked/ranked transitions as placement-state changes, not rank up/down alerts.
+    if not previous_entry or not current_entry:
+        return None
     name = riot_id.split("#", 1)[0]
     normalized_queue = normalize_queue_type(queue_type) or queue_type
     queue_label = RANKED_QUEUE_LABELS.get(normalized_queue, normalized_queue)
