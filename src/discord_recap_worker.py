@@ -3,8 +3,39 @@ from datetime import datetime
 
 import requests
 
-from src.discord_text import format_recap_player_line, format_recap_queue_name, match_recap_state_key
-from src.report_logic import get_match_end_unix_seconds
+from src.discord_text import (
+    format_recap_player_line,
+    format_recap_queue_name,
+    format_streak_callout,
+    match_recap_state_key,
+    streak_callout_state_key,
+)
+from src.report_logic import get_match_end_unix_seconds, get_mode_bucket
+
+
+async def get_ranked_streak_info(riot_client, puuid, recent_ids, max_matches=8):
+    streak_result = None
+    streak_count = 0
+    for match_id in recent_ids[:max(1, max_matches)]:
+        match_info = await riot_client.fetch_match_info(match_id)
+        queue_id = int(match_info.get("info", {}).get("queueId", -1))
+        if get_mode_bucket(queue_id) is None:
+            continue
+        participant = riot_client.get_participant(match_info, puuid)
+        if participant is None:
+            continue
+        won = bool(participant.get("win"))
+        if streak_result is None:
+            streak_result = won
+            streak_count = 1
+            continue
+        if won == streak_result:
+            streak_count += 1
+            continue
+        break
+    if streak_result is None:
+        return 0, None
+    return streak_count, streak_result
 
 
 async def process_recap_cycle(
@@ -23,12 +54,14 @@ async def process_recap_cycle(
     log,
 ):
     puuid_by_riot_id = {}
+    recent_ids_by_riot_id = {}
     matches_to_report = set()
     for riot_id in friends:
         try:
             puuid = await riot_client.fetch_puuid(riot_id)
             puuid_by_riot_id[riot_id] = puuid
             recent_ids = await riot_client.fetch_recent_match_ids(puuid, count=20)
+            recent_ids_by_riot_id[riot_id] = recent_ids
             if not recent_ids:
                 continue
 
@@ -91,15 +124,40 @@ async def process_recap_cycle(
         await channel.send(message)
         log(f"[recap] Posted new match recap for {match_id} in channel {match_recap_channel_id}.")
 
+    affected_riot_ids = set()
+    for _end_ts, _match_id, _queue_id, _duration_seconds, tracked_participants in match_entries:
+        for riot_id, _participant in tracked_participants:
+            affected_riot_ids.add(riot_id)
+
+    for riot_id in sorted(affected_riot_ids, key=str.casefold):
+        puuid = puuid_by_riot_id.get(riot_id)
+        recent_ids = recent_ids_by_riot_id.get(riot_id, [])
+        if puuid is None or not recent_ids:
+            continue
+        try:
+            streak_count, is_win_streak = await get_ranked_streak_info(riot_client, puuid, recent_ids)
+            state_key = streak_callout_state_key(riot_id)
+            if streak_count < 3 or is_win_streak is None:
+                await asyncio.to_thread(db_set_state, state_key, "none")
+                continue
+
+            streak_token = f"{'W' if is_win_streak else 'L'}:{streak_count}"
+            last_token = await asyncio.to_thread(db_get_state, state_key)
+            if last_token == streak_token:
+                continue
+            await channel.send(format_streak_callout(riot_id, streak_count, is_win_streak))
+            await asyncio.to_thread(db_set_state, state_key, streak_token)
+            log(f"[recap] Posted streak callout for {riot_id} ({streak_token}).")
+        except requests.RequestException as exc:
+            log(f"[recap] Could not build streak callout for {riot_id}: {exc}")
+        except Exception as exc:
+            log(f"[recap] Streak callout skipped for {riot_id}: {exc}")
+
     if not db_enabled:
         return
 
     try:
         cycle_key = mood_service.get_cycle_key()
-        affected_riot_ids = set()
-        for _end_ts, _match_id, _queue_id, _duration_seconds, tracked_participants in match_entries:
-            for riot_id, _participant in tracked_participants:
-                affected_riot_ids.add(riot_id)
 
         for riot_id in sorted(affected_riot_ids, key=str.casefold):
             mode_records, performance_totals = await riot_client.get_today_mode_records(riot_id)

@@ -67,3 +67,26 @@ All workers include startup jitter and per-cycle heartbeat logs:
 
 - Add per-worker success/error counters to health output.
 - Add log sampling/structured metrics export for cycle latency trends.
+
+## Future Fun Features Backlog
+
+- Daily MVP + "Clutch/Int" awards:
+  - Auto-post superlatives from stats (best CS/min, biggest damage, most deaths, etc.).
+- Head-to-head leaderboard:
+  - `!vs Name1 Name2` for today/week with win rate and KDA comparison.
+- Streak callouts:
+  - Highlight win heaters and loss tilt streaks with optional roast tone.
+- Weekly title belts:
+  - Rotating titles like "Damage King", "Objective Goblin", and "Vision Dad".
+- Prediction game:
+  - Players predict someone’s day record and earn points for close calls.
+- Personal profile cards:
+  - `!profile Name#Tag` with trend view, best queue, and signature champion/role.
+- Party synergy stat:
+  - Rank duo/trio combinations among tracked players by win rate.
+- Seasonal points system:
+  - Month-long points race with winner announcement and crown.
+- Clip/quote of the day:
+  - Attach one player-submitted quote or clip to recap flow.
+- Boss challenge mode:
+  - Weekly team objective with success/fail announcement.

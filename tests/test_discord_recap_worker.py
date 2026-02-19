@@ -56,6 +56,13 @@ class FakeRiotClient:
         self.today_mode_calls.append(riot_id)
         return self.mode_records_by_riot_id[riot_id]
 
+    @staticmethod
+    def get_participant(match_info, puuid):
+        for participant in match_info.get("info", {}).get("participants", []):
+            if participant.get("puuid") == puuid:
+                return participant
+        return None
+
 
 class FakeMoodService:
     def __init__(self):
@@ -152,6 +159,77 @@ def test_process_recap_cycle_posts_recap_and_syncs_affected_players():
     assert [row[1] for row in upserts] == ["Alpha#NA1", "Bravo#NA1"]
     assert mood.invalidated is True
     assert edit_calls == [{"bypass_cache": True}]
+
+
+def test_process_recap_cycle_posts_streak_callout_when_threshold_crossed():
+    channel = FakeChannel()
+    riot = FakeRiotClient()
+    mood = FakeMoodService()
+    now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+
+    riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a"}
+    riot.recent_ids_by_puuid = {"puuid-a": ["EUW1_3", "EUW1_2", "EUW1_1"]}
+    riot.match_info_by_id = {
+        "EUW1_3": {
+            "info": {
+                "queueId": 420,
+                "gameDuration": 1800,
+                "gameEndTimestamp": now_ms,
+                "participants": [_participant("puuid-a", win=True)],
+            }
+        },
+        "EUW1_2": {
+            "info": {
+                "queueId": 420,
+                "gameDuration": 1800,
+                "gameEndTimestamp": now_ms - 1800,
+                "participants": [_participant("puuid-a", win=True)],
+            }
+        },
+        "EUW1_1": {
+            "info": {
+                "queueId": 420,
+                "gameDuration": 1800,
+                "gameEndTimestamp": now_ms - 3600,
+                "participants": [_participant("puuid-a", win=True)],
+            }
+        },
+    }
+    riot.mode_records_by_riot_id = {
+        "Alpha#NA1": (
+            {"solo_duo": {"wins": 3, "losses": 0}, "flex": {"wins": 0, "losses": 0}, "arcade": {"wins": 0, "losses": 0}},
+            {"cs_total": 100, "minutes_total": 30.0},
+        ),
+    }
+
+    state = {_state_key("Alpha#NA1"): "EUW1_2"}
+
+    def db_get_state(key):
+        return state.get(key)
+
+    def db_set_state(key, value):
+        state[key] = value
+
+    asyncio.run(
+        process_recap_cycle(
+            friends=["Alpha#NA1"],
+            riot_client=riot,
+            mood_service=mood,
+            report_timezone=timezone.utc,
+            match_recap_channel_id=123,
+            channel=channel,
+            db_enabled=True,
+            db_get_state=db_get_state,
+            db_set_state=db_set_state,
+            db_upsert_daily_stats=lambda *_args, **_kwargs: None,
+            edit_last_report_message=lambda **_kwargs: asyncio.sleep(0),
+            log=lambda _msg: None,
+        )
+    )
+
+    assert len(channel.messages) == 2
+    assert "New Match Recap" in channel.messages[0]
+    assert "Heater Alert" in channel.messages[1] or "Momentum" in channel.messages[1]
 
 
 def test_process_recap_cycle_no_new_matches_skips_post_and_sync():

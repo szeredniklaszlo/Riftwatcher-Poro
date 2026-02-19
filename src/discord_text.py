@@ -14,6 +14,10 @@ def match_recap_state_key(riot_id):
     return f"last_announced_match_id::{riot_id.casefold()}"
 
 
+def streak_callout_state_key(riot_id):
+    return f"last_announced_streak::{riot_id.casefold()}"
+
+
 def format_recap_queue_name(queue_id):
     if queue_id == 420:
         return "\U0001F3C6 Ranked Solo/Duo"
@@ -67,4 +71,27 @@ def format_recap_player_line(riot_id, participant, match_duration_seconds):
         f"   \u2694\uFE0F `K/D/A {kills}/{deaths}/{assists}`  \U0001F33E `CS/min {cs_per_min:.1f}`\n"
         f"   \U0001F4A5 `Damage {player_damage:,}`  \U0001F3F0 `Objectives {objective_damage:,}`  \U0001F6E1\uFE0F `Taken {damage_taken:,}`\n"
         f"   \u2764\uFE0F `Healing {healing:,}`  \U0001F441\uFE0F `Vision {vision_score}`"
+    )
+
+
+def format_streak_callout(riot_id, streak_count, is_win_streak):
+    name = riot_id.split("#", 1)[0]
+    if is_win_streak:
+        if streak_count >= 5:
+            return (
+                f"\U0001F525 **Heater Alert** `{name}` is on a `{streak_count}`-game ranked win streak.\n"
+                "Queue confidence is at dangerous levels."
+            )
+        return (
+            f"\u2728 **Momentum** `{name}` is now `{streak_count}` wins in a row in ranked.\n"
+            "Keep the streak alive."
+        )
+    if streak_count >= 5:
+        return (
+            f"\U0001F6A8 **Tilt Watch** `{name}` is on a `{streak_count}`-game ranked loss streak.\n"
+            "Step away from queue before this becomes history."
+        )
+    return (
+        f"\U0001F480 **Cold Streak** `{name}` just hit `{streak_count}` ranked losses in a row.\n"
+        "Time for a reset and a better draft."
     )
