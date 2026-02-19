@@ -33,6 +33,11 @@ class RiotApiClient:
     TRANSIENT_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
     BACKFILL_MIN_PAUSE_SECONDS = 120.0
     BACKFILL_PAUSE_MULTIPLIER = 3.0
+    RIOT_LIMIT_SHORT_COUNT = 20
+    RIOT_LIMIT_SHORT_WINDOW_SECONDS = 1.0
+    RIOT_LIMIT_LONG_COUNT = 100
+    RIOT_LIMIT_LONG_WINDOW_SECONDS = 120.0
+    BACKFILL_LONG_WINDOW_BUDGET = 80
 
     def __init__(
         self,
@@ -73,6 +78,8 @@ class RiotApiClient:
         self.match_info_cache = OrderedDict()
         self._backfill_pause_until = 0.0
         self._backfill_pause_lock = threading.Lock()
+        self._request_timestamps = []
+        self._rate_limit_lock = threading.Lock()
 
     def clear_match_cache(self):
         self.match_info_cache.clear()
@@ -114,12 +121,57 @@ class RiotApiClient:
         self.log(f"[backfill] Throttled; waiting {remaining:.1f}s before next Riot request.")
         await asyncio.sleep(remaining)
 
+    def _prune_request_timestamps(self, now):
+        cutoff = now - self.RIOT_LIMIT_LONG_WINDOW_SECONDS
+        keep_from = 0
+        for index, ts in enumerate(self._request_timestamps):
+            if ts >= cutoff:
+                keep_from = index
+                break
+        else:
+            self._request_timestamps = []
+            return
+        if keep_from > 0:
+            self._request_timestamps = self._request_timestamps[keep_from:]
+
+    def _wait_for_rate_limit_slot(self, *, request_tier):
+        while True:
+            now = time.monotonic()
+            with self._rate_limit_lock:
+                self._prune_request_timestamps(now)
+                short_count = 0
+                short_cutoff = now - self.RIOT_LIMIT_SHORT_WINDOW_SECONDS
+                for ts in reversed(self._request_timestamps):
+                    if ts >= short_cutoff:
+                        short_count += 1
+                    else:
+                        break
+                long_count = len(self._request_timestamps)
+
+                wait_seconds = 0.0
+                if short_count >= self.RIOT_LIMIT_SHORT_COUNT:
+                    short_oldest = self._request_timestamps[-short_count]
+                    wait_seconds = max(wait_seconds, (short_oldest + self.RIOT_LIMIT_SHORT_WINDOW_SECONDS) - now)
+                if long_count >= self.RIOT_LIMIT_LONG_COUNT:
+                    long_oldest = self._request_timestamps[0]
+                    wait_seconds = max(wait_seconds, (long_oldest + self.RIOT_LIMIT_LONG_WINDOW_SECONDS) - now)
+                if request_tier == "backfill" and long_count >= self.BACKFILL_LONG_WINDOW_BUDGET:
+                    budget_oldest = self._request_timestamps[long_count - self.BACKFILL_LONG_WINDOW_BUDGET]
+                    wait_seconds = max(wait_seconds, (budget_oldest + self.RIOT_LIMIT_LONG_WINDOW_SECONDS) - now)
+
+                if wait_seconds <= 0:
+                    self._request_timestamps.append(now)
+                    return
+
+            time.sleep(max(0.01, wait_seconds))
+
     def riot_get_json(self, url, *, request_tier="priority"):
         headers = {"X-Riot-Token": self.riot_api_key}
         max_attempts = 5
 
         for attempt in range(1, max_attempts + 1):
             try:
+                self._wait_for_rate_limit_slot(request_tier=request_tier)
                 start_time = time.perf_counter()
                 response = requests.get(url, headers=headers, timeout=20)
                 elapsed_ms = int((time.perf_counter() - start_time) * 1000)

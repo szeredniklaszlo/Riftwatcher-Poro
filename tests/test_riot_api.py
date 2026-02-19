@@ -174,3 +174,44 @@ def test_wait_for_backfill_window_sleeps_when_pause_is_active(monkeypatch):
     asyncio.run(client.wait_for_backfill_window())
 
     assert slept["seconds"] == 2.5
+
+
+def test_rate_limiter_waits_when_short_window_is_full(monkeypatch):
+    client = build_client()
+    now = {"value": 100.0}
+    slept = []
+
+    monkeypatch.setattr("src.riot_api.time.monotonic", lambda: now["value"])
+
+    def fake_sleep(seconds):
+        slept.append(seconds)
+        now["value"] += seconds
+
+    monkeypatch.setattr("src.riot_api.time.sleep", fake_sleep)
+
+    client._request_timestamps = [99.5 + (i * 0.01) for i in range(client.RIOT_LIMIT_SHORT_COUNT)]
+    client._wait_for_rate_limit_slot(request_tier="priority")
+
+    assert slept
+    assert client._request_timestamps[-1] >= 100.0
+
+
+def test_rate_limiter_applies_extra_backfill_budget_guard(monkeypatch):
+    client = build_client()
+    now = {"value": 200.0}
+    slept = []
+
+    monkeypatch.setattr("src.riot_api.time.monotonic", lambda: now["value"])
+
+    def fake_sleep(seconds):
+        slept.append(seconds)
+        now["value"] += seconds
+
+    monkeypatch.setattr("src.riot_api.time.sleep", fake_sleep)
+
+    # 85 calls in last 120s, above backfill budget (80) but below hard API cap (100).
+    client._request_timestamps = [150.0 + i for i in range(85)]
+    client._wait_for_rate_limit_slot(request_tier="backfill")
+
+    assert slept
+    assert client._request_timestamps[-1] >= now["value"]
