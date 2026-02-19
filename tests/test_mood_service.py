@@ -1,4 +1,92 @@
-﻿from src.mood_service import MoodService
+import asyncio
+from datetime import datetime, timedelta, timezone
+
+from src.mood_service import MoodService
+
+
+class FakeRiotClient:
+    def __init__(self):
+        self.today_records_by_riot_id = {}
+        self.puuid_by_riot_id = {}
+        self.recent_ids_by_puuid = {}
+        self.match_info_by_id = {}
+        self.clear_match_cache_calls = 0
+        self.get_today_mode_records_calls = []
+
+    def clear_match_cache(self):
+        self.clear_match_cache_calls += 1
+
+    async def get_today_mode_records(self, riot_id):
+        self.get_today_mode_records_calls.append(riot_id)
+        return self.today_records_by_riot_id[riot_id]
+
+    async def fetch_puuid(self, riot_id):
+        return self.puuid_by_riot_id[riot_id]
+
+    async def fetch_recent_match_ids(self, puuid, count=20):
+        return self.recent_ids_by_puuid.get(puuid, [])
+
+    async def fetch_match_info(self, match_id):
+        return self.match_info_by_id[match_id]
+
+    @staticmethod
+    def get_participant(match_info, puuid):
+        for participant in match_info["info"]["participants"]:
+            if participant.get("puuid") == puuid:
+                return participant
+        return None
+
+
+def _create_service(
+    *,
+    friends,
+    riot_client,
+    db_load_latest_stats=lambda _cycle_key: [],
+    db_upsert_daily_stats=lambda *_args, **_kwargs: None,
+    db_get_daily_stats_for_player=lambda _cycle_key, _riot_id: None,
+    db_get_last_seen_match_id=lambda _riot_id: None,
+    db_set_last_seen_match_id=lambda _riot_id, _match_id: None,
+):
+    return MoodService(
+        log=lambda _message: None,
+        friends=friends,
+        riot_client=riot_client,
+        report_timezone=timezone.utc,
+        report_day_start_hour=0,
+        report_cache_seconds=120,
+        daily_refresh_seconds=300,
+        db_enabled=True,
+        db_load_latest_stats=db_load_latest_stats,
+        db_upsert_daily_stats=db_upsert_daily_stats,
+        db_get_daily_stats_for_player=db_get_daily_stats_for_player,
+        db_get_last_seen_match_id=db_get_last_seen_match_id,
+        db_set_last_seen_match_id=db_set_last_seen_match_id,
+        db_health_stats=lambda: {"db_ok": True, "match_cache_entries": 0},
+    )
+
+
+def _stats_row(riot_id, updated_at, *, solo_wins=0, solo_losses=0, flex_wins=0, flex_losses=0):
+    return (
+        riot_id,
+        solo_wins,
+        solo_losses,
+        flex_wins,
+        flex_losses,
+        0,
+        0,
+        solo_wins + flex_wins,
+        solo_losses + flex_losses,
+        updated_at,
+        0,
+        0.0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
 
 
 def test_get_new_match_ids_when_last_seen_present():
@@ -57,11 +145,208 @@ def test_get_leader_badges_by_player_marks_category_leads():
     ]
 
     badges = MoodService.get_leader_badges_by_player(ranked_results)
-    assert "🌾" in badges["Alpha"]  # tied CS/min lead
-    assert "🏰" in badges["Alpha"]
-    assert "❤️" in badges["Alpha"]  # most healing
-    assert "🗡️" in badges["Alpha"]
-    assert "💥" in badges["Bravo"]
-    assert "🛡️" in badges["Bravo"]  # most damage taken
-    assert "☠️" in badges["Bravo"]  # most deaths
-    assert "👁️" in badges["Bravo"]
+    assert "\U0001F33E" in badges["Alpha"]
+    assert "\U0001F3F0" in badges["Alpha"]
+    assert "\u2764\uFE0F" in badges["Alpha"]
+    assert "\U0001F5E1\uFE0F" in badges["Alpha"]
+    assert "\U0001F4A5" in badges["Bravo"]
+    assert "\U0001F6E1\uFE0F" in badges["Bravo"]
+    assert "\u2620\uFE0F" in badges["Bravo"]
+    assert "\U0001F441\uFE0F" in badges["Bravo"]
+
+
+def test_build_report_falls_back_to_live_when_snapshot_stale():
+    riot = FakeRiotClient()
+    riot.today_records_by_riot_id["Alpha#NA1"] = (
+        {"solo_duo": {"wins": 2, "losses": 1}, "flex": {"wins": 0, "losses": 0}, "arcade": {"wins": 0, "losses": 0}},
+        {
+            "cs_total": 0,
+            "minutes_total": 0.0,
+            "objective_damage": 0,
+            "player_damage": 0,
+            "healing": 0,
+            "damage_taken": 0,
+            "kills": 0,
+            "deaths": 0,
+            "vision_score": 0,
+        },
+    )
+    stale_row = _stats_row("Alpha#NA1", datetime.now(tz=timezone.utc) - timedelta(hours=2), solo_wins=1, solo_losses=1)
+    service = _create_service(
+        friends=["Alpha#NA1"],
+        riot_client=riot,
+        db_load_latest_stats=lambda _cycle_key: [stale_row],
+    )
+
+    report = asyncio.run(service.build_today_win_rate_report())
+
+    assert "Alpha" in report
+    assert riot.clear_match_cache_calls == 1
+    assert riot.get_today_mode_records_calls == ["Alpha#NA1"]
+
+
+def test_build_report_falls_back_to_live_when_snapshot_sparse():
+    riot = FakeRiotClient()
+    riot.today_records_by_riot_id["Alpha#NA1"] = (
+        {"solo_duo": {"wins": 2, "losses": 0}, "flex": {"wins": 0, "losses": 0}, "arcade": {"wins": 0, "losses": 0}},
+        {
+            "cs_total": 0,
+            "minutes_total": 0.0,
+            "objective_damage": 0,
+            "player_damage": 0,
+            "healing": 0,
+            "damage_taken": 0,
+            "kills": 0,
+            "deaths": 0,
+            "vision_score": 0,
+        },
+    )
+    riot.today_records_by_riot_id["Bravo#NA1"] = (
+        {"solo_duo": {"wins": 1, "losses": 1}, "flex": {"wins": 0, "losses": 0}, "arcade": {"wins": 0, "losses": 0}},
+        {
+            "cs_total": 0,
+            "minutes_total": 0.0,
+            "objective_damage": 0,
+            "player_damage": 0,
+            "healing": 0,
+            "damage_taken": 0,
+            "kills": 0,
+            "deaths": 0,
+            "vision_score": 0,
+        },
+    )
+    fresh_row = _stats_row("Alpha#NA1", datetime.now(tz=timezone.utc), solo_wins=3, solo_losses=0)
+    service = _create_service(
+        friends=["Alpha#NA1", "Bravo#NA1"],
+        riot_client=riot,
+        db_load_latest_stats=lambda _cycle_key: [fresh_row],
+    )
+
+    report = asyncio.run(service.build_today_win_rate_report())
+
+    assert "Alpha" in report
+    assert "Bravo" in report
+    assert riot.get_today_mode_records_calls == ["Alpha#NA1", "Bravo#NA1"]
+
+
+def test_refresh_recent_matches_snapshot_updates_baseline_stats():
+    riot = FakeRiotClient()
+    riot.puuid_by_riot_id["Alpha#NA1"] = "puuid-alpha"
+    riot.recent_ids_by_puuid["puuid-alpha"] = ["m3", "m2", "m1"]
+    riot.match_info_by_id["m2"] = {
+        "info": {
+            "queueId": 420,
+            "gameDuration": 1800,
+            "gameEndTimestamp": int(datetime.now(tz=timezone.utc).timestamp() * 1000),
+            "participants": [
+                {
+                    "puuid": "puuid-alpha",
+                    "win": True,
+                    "totalMinionsKilled": 100,
+                    "neutralMinionsKilled": 20,
+                    "damageDealtToObjectives": 1000,
+                    "totalDamageDealtToChampions": 2000,
+                    "totalHeal": 300,
+                    "totalDamageTaken": 4000,
+                    "kills": 5,
+                    "deaths": 2,
+                    "visionScore": 10,
+                }
+            ],
+        }
+    }
+    riot.match_info_by_id["m3"] = {
+        "info": {
+            "queueId": 420,
+            "gameDuration": 1800,
+            "gameEndTimestamp": int(datetime.now(tz=timezone.utc).timestamp() * 1000),
+            "participants": [
+                {
+                    "puuid": "puuid-alpha",
+                    "win": False,
+                    "totalMinionsKilled": 90,
+                    "neutralMinionsKilled": 10,
+                    "damageDealtToObjectives": 900,
+                    "totalDamageDealtToChampions": 1500,
+                    "totalHeal": 200,
+                    "totalDamageTaken": 3500,
+                    "kills": 3,
+                    "deaths": 4,
+                    "visionScore": 7,
+                }
+            ],
+        }
+    }
+
+    upserts = []
+    last_seen_writes = []
+    baseline_row = (0, 0, 0, 0, 0, 0, 50, 10.0, 100, 200, 30, 40, 1, 1, 2)
+    service = _create_service(
+        friends=["Alpha#NA1"],
+        riot_client=riot,
+        db_get_last_seen_match_id=lambda _riot_id: "m1",
+        db_get_daily_stats_for_player=lambda _cycle_key, _riot_id: baseline_row,
+        db_upsert_daily_stats=lambda cycle_key, riot_id, mode_records, performance_totals: upserts.append(
+            (cycle_key, riot_id, mode_records, performance_totals)
+        ),
+        db_set_last_seen_match_id=lambda riot_id, match_id: last_seen_writes.append((riot_id, match_id)),
+    )
+    service.report_cache["text"] = "cached"
+    service.report_cache["day"] = service.get_cycle_key()
+    service.report_cache["expires_at"] = 9999999999.0
+
+    asyncio.run(service.refresh_recent_matches_snapshot(recent_count=20))
+
+    assert len(upserts) == 1
+    _cycle_key, riot_id, mode_records, performance_totals = upserts[0]
+    assert riot_id == "Alpha#NA1"
+    assert mode_records["solo_duo"]["wins"] == 1
+    assert mode_records["solo_duo"]["losses"] == 1
+    assert performance_totals["cs_total"] == 270
+    assert performance_totals["minutes_total"] == 70.0
+    assert last_seen_writes == [("Alpha#NA1", "m3")]
+    assert service.report_cache["text"] is None
+
+
+def test_refresh_recent_matches_snapshot_falls_back_when_baseline_missing():
+    riot = FakeRiotClient()
+    riot.puuid_by_riot_id["Alpha#NA1"] = "puuid-alpha"
+    riot.recent_ids_by_puuid["puuid-alpha"] = ["m2", "m1"]
+    riot.today_records_by_riot_id["Alpha#NA1"] = (
+        {"solo_duo": {"wins": 3, "losses": 2}, "flex": {"wins": 0, "losses": 0}, "arcade": {"wins": 0, "losses": 0}},
+        {
+            "cs_total": 100,
+            "minutes_total": 30.0,
+            "objective_damage": 1000,
+            "player_damage": 2000,
+            "healing": 300,
+            "damage_taken": 4000,
+            "kills": 10,
+            "deaths": 5,
+            "vision_score": 20,
+        },
+    )
+
+    upserts = []
+    last_seen_writes = []
+    service = _create_service(
+        friends=["Alpha#NA1"],
+        riot_client=riot,
+        db_get_last_seen_match_id=lambda _riot_id: "m1",
+        db_get_daily_stats_for_player=lambda _cycle_key, _riot_id: None,
+        db_upsert_daily_stats=lambda cycle_key, riot_id, mode_records, performance_totals: upserts.append(
+            (cycle_key, riot_id, mode_records, performance_totals)
+        ),
+        db_set_last_seen_match_id=lambda riot_id, match_id: last_seen_writes.append((riot_id, match_id)),
+    )
+    service.report_cache["text"] = "cached"
+    service.report_cache["day"] = service.get_cycle_key()
+    service.report_cache["expires_at"] = 9999999999.0
+
+    asyncio.run(service.refresh_recent_matches_snapshot(recent_count=20))
+
+    assert len(upserts) == 1
+    assert upserts[0][1] == "Alpha#NA1"
+    assert last_seen_writes == [("Alpha#NA1", "m2")]
+    assert riot.get_today_mode_records_calls == ["Alpha#NA1"]
+    assert service.report_cache["text"] is None
