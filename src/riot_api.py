@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -28,6 +29,8 @@ def get_lol_name(riot_id):
 
 
 class RiotApiClient:
+    TRANSIENT_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
+
     def __init__(
         self,
         *,
@@ -79,33 +82,62 @@ class RiotApiClient:
 
     def riot_get_json(self, url):
         headers = {"X-Riot-Token": self.riot_api_key}
-        max_attempts = 4
+        max_attempts = 5
 
         for attempt in range(1, max_attempts + 1):
-            start_time = time.perf_counter()
-            response = requests.get(url, headers=headers, timeout=20)
-            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-            if self.log_riot_requests:
-                self.log(f"[riot] {response.status_code} in {elapsed_ms}ms: {url}")
-
-            if response.status_code != 429:
-                if response.status_code == 401 and self.on_unauthorized is not None:
-                    self.on_unauthorized()
-                response.raise_for_status()
-                return response.json()
-
-            retry_after_header = response.headers.get("Retry-After", "1")
             try:
-                retry_after = float(retry_after_header)
-            except ValueError:
-                retry_after = 1.0
+                start_time = time.perf_counter()
+                response = requests.get(url, headers=headers, timeout=20)
+                elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+                if self.log_riot_requests:
+                    self.log(f"[riot] {response.status_code} in {elapsed_ms}ms: {url}")
+            except requests.RequestException as exc:
+                if attempt == max_attempts:
+                    raise
+                sleep_seconds = self.retry_backoff_seconds(attempt)
+                self.log(
+                    f"[riot] Request error ({type(exc).__name__}). "
+                    f"attempt={attempt}/{max_attempts}, sleep={sleep_seconds:.2f}s"
+                )
+                time.sleep(sleep_seconds)
+                continue
 
-            if attempt == max_attempts:
-                response.raise_for_status()
+            if response.status_code == 401 and self.on_unauthorized is not None:
+                self.on_unauthorized()
 
-            sleep_seconds = max(1.0, retry_after)
-            self.log(f"[riot] 429 received. attempt={attempt}/{max_attempts}, sleep={sleep_seconds}s")
-            time.sleep(sleep_seconds)
+            if response.status_code == 429:
+                retry_after_header = response.headers.get("Retry-After", "1")
+                try:
+                    retry_after = float(retry_after_header)
+                except ValueError:
+                    retry_after = 1.0
+
+                if attempt == max_attempts:
+                    response.raise_for_status()
+                sleep_seconds = max(1.0, retry_after)
+                self.log(f"[riot] 429 received. attempt={attempt}/{max_attempts}, sleep={sleep_seconds}s")
+                time.sleep(sleep_seconds)
+                continue
+
+            if response.status_code in self.TRANSIENT_HTTP_STATUSES:
+                if attempt == max_attempts:
+                    response.raise_for_status()
+                sleep_seconds = self.retry_backoff_seconds(attempt)
+                self.log(
+                    f"[riot] Transient HTTP {response.status_code}. "
+                    f"attempt={attempt}/{max_attempts}, sleep={sleep_seconds:.2f}s"
+                )
+                time.sleep(sleep_seconds)
+                continue
+
+            response.raise_for_status()
+            return response.json()
+
+    @staticmethod
+    def retry_backoff_seconds(attempt):
+        base = min(8.0, 0.5 * (2 ** max(0, attempt - 1)))
+        jitter = random.uniform(0.0, 0.25)
+        return base + jitter
 
     async def riot_get_json_async(self, url):
         return await asyncio.to_thread(self.riot_get_json, url)
