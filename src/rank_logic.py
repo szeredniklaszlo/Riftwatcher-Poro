@@ -83,7 +83,7 @@ def format_rank_change_message(riot_id, queue_type, previous_entry, current_entr
         )
     if direction < 0:
         return (
-            f"\U0001F525 **Rank Down.** `{name}` slipped in **{queue_label}**\n"
+            f"\U0001F4A9 **Rank Down.** `{name}` slipped in **{queue_label}**\n"
             f"`{old_rank}` \u27A1\uFE0F `{new_rank}`\n"
             "Absolute int performance. Queue again and fix it."
         )
