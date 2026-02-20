@@ -90,3 +90,35 @@ All workers include startup jitter and per-cycle heartbeat logs:
   - Attach one player-submitted quote or clip to recap flow.
 - Boss challenge mode:
   - Weekly team objective with success/fail announcement.
+
+## Resume Snapshot (2026-02-20)
+
+- Branch: `main`
+- Working tree: clean
+- Latest pushed commits:
+  - `5865367` `feat(recap): add ranked streak callouts with banter and dedupe`
+  - `8204f8d` `feat(rate-limit): enforce global Riot limits with backfill budget guard`
+  - `f6908e2` `feat(rate-limit): throttle backfill on 429 and expand tests`
+
+### Implemented This Session
+
+- Added backfill-only adaptive throttling after Riot `429` responses.
+- Added global Riot request limiting in `RiotApiClient`:
+  - `20 requests / 1 second`
+  - `100 requests / 120 seconds`
+- Added backfill budget guard so backfill yields early under long-window load.
+- Added ranked streak callouts (banter tone) in recap flow with DB dedupe state:
+  - State key: `last_announced_streak::<riot_id>`
+  - Triggers at streak `>= 3` for ranked queues (solo/flex).
+- Added/updated tests for command handlers, recap worker, text formatters, and limiter behavior.
+
+### Current Test Status
+
+- `42 passed` via:
+  - `& 'C:\Users\gardf\AppData\Local\Python\bin\python.exe' -m pytest -q`
+
+### Current Operational Notes
+
+- Priority workers (`refresh`, `recap`, `rank`) remain high-priority.
+- Backfill is intentionally de-prioritized under rate-limit pressure.
+- Riot `429` can still occur during peak load, but backfill now yields and global limiter smooths burst pressure.
