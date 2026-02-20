@@ -573,7 +573,8 @@ async def on_ready():
     )
     log(
         f"[startup] Use {WEEK_COMMAND} in channel {DAILY_REPORT_CHANNEL_ID}; "
-        f"it publishes in {WEEKLY_REPORT_CHANNEL_ID}."
+        f"it publishes in {WEEKLY_REPORT_CHANNEL_ID} "
+        f"for Monday {REPORT_DAY_START_HOUR:02d}:00 -> next Monday {REPORT_DAY_START_HOUR:02d}:00."
     )
     log(f"[startup] Use {ADD_COMMAND} <Name#Tag> to add a player at runtime.")
     log(f"[startup] Use {DEBUG_PLAYER_COMMAND} <Name#Tag> to inspect queue bucket mapping.")

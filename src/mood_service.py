@@ -111,12 +111,16 @@ class MoodService:
         )
 
     def get_week_window(self, now_utc=None):
-        if now_utc is None:
-            now_utc = datetime.now(tz=timezone.utc)
-        now_local = now_utc.astimezone(self.report_timezone)
-        monday_local_date = (now_local - timedelta(days=now_local.weekday())).date()
-        friday_local_date = monday_local_date + timedelta(days=4)
-        return monday_local_date, friday_local_date
+        cycle_date = datetime.fromisoformat(
+            get_report_cycle_key(
+                self.report_timezone,
+                day_start_hour=self.report_day_start_hour,
+                now_utc=now_utc,
+            )
+        ).date()
+        week_start_date = cycle_date - timedelta(days=cycle_date.weekday())
+        week_end_exclusive_date = week_start_date + timedelta(days=7)
+        return week_start_date, week_end_exclusive_date
 
     @staticmethod
     def rows_to_ranked_results(rows, tracked_friends):
@@ -424,8 +428,8 @@ class MoodService:
         if not self.db_enabled:
             return "Weekly report requires database-backed daily stats."
 
-        week_start, week_end = self.get_week_window()
-        window_key = f"{week_start.isoformat()}::{week_end.isoformat()}"
+        week_start, week_end_exclusive = self.get_week_window()
+        window_key = f"{week_start.isoformat()}::{week_end_exclusive.isoformat()}"
         now_monotonic = time.monotonic()
         if (
             not bypass_cache
@@ -440,7 +444,7 @@ class MoodService:
         stored_rows = await asyncio.to_thread(
             self.db_load_weekly_stats,
             week_start.isoformat(),
-            week_end.isoformat(),
+            week_end_exclusive.isoformat(),
         )
         ranked_results = self.rows_to_ranked_results(stored_rows, self.friends)
         report_text = self.format_report_from_results(
@@ -448,8 +452,14 @@ class MoodService:
             [],
             report_start,
             header_title="WEEKLY",
-            empty_line_1=f"No ranked games yet for {week_start:%d.%m} to {week_end:%d.%m}.",
-            empty_line_2="Weekly report covers Monday through Friday.",
+            empty_line_1=(
+                f"No ranked games yet for week {week_start:%d.%m} "
+                f"to {(week_end_exclusive - timedelta(days=1)):%d.%m}."
+            ),
+            empty_line_2=(
+                f"Weekly report covers Monday {self.report_day_start_hour:02d}:00 "
+                f"through next Monday {self.report_day_start_hour:02d}:00."
+            ),
         )
         self.weekly_report_cache["text"] = report_text
         self.weekly_report_cache["window"] = window_key

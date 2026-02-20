@@ -182,7 +182,7 @@ async def handle_incoming_message(
                         await message.channel.send("Weekly report failed: could not access weekly report channel.")
                         return
                     target_channel = resolved_channel
-                loading_text = "\u23F3 Building Monday-Friday weekly report from stored stats..."
+                loading_text = "\u23F3 Building weekly report (Monday 06:00 -> next Monday 06:00) from stored stats..."
                 status_message = await get_or_create_weekly_report_message(target_channel, loading_text)
                 if status_message.content != loading_text:
                     await status_message.edit(content=loading_text)

@@ -229,7 +229,7 @@ def test_build_report_uses_snapshot_when_only_one_player_has_ranked_games():
     assert riot.get_today_mode_records_calls == []
 
 
-def test_build_weekly_report_aggregates_monday_to_friday_rows():
+def test_build_weekly_report_aggregates_full_week_rows():
     riot = FakeRiotClient()
     weekly_rows = [
         (
@@ -265,6 +265,32 @@ def test_build_weekly_report_aggregates_monday_to_friday_rows():
     assert "LEAGUE MOOD (WEEKLY)" in report
     assert "Alpha" in report
     assert "`5W-1L`" in report
+
+
+def test_get_week_window_respects_day_start_cutoff():
+    service = MoodService(
+        log=lambda _message: None,
+        friends=[],
+        riot_client=FakeRiotClient(),
+        report_timezone=timezone.utc,
+        report_day_start_hour=6,
+        report_cache_seconds=120,
+        daily_refresh_seconds=300,
+        db_enabled=True,
+        db_load_latest_stats=lambda _day: [],
+        db_load_weekly_stats=lambda _start, _end: [],
+        db_upsert_daily_stats=lambda *_args, **_kwargs: None,
+        db_get_daily_stats_for_player=lambda _day, _riot_id: None,
+        db_get_last_seen_match_id=lambda _riot_id: None,
+        db_set_last_seen_match_id=lambda _riot_id, _match_id: None,
+        db_health_stats=lambda: {"db_ok": True, "match_cache_entries": 0},
+    )
+
+    before_cutoff = datetime(2026, 2, 23, 5, 30, tzinfo=timezone.utc)  # Monday 05:30, still previous cycle-day
+    week_start, week_end_exclusive = service.get_week_window(now_utc=before_cutoff)
+
+    assert week_start.isoformat() == "2026-02-16"
+    assert week_end_exclusive.isoformat() == "2026-02-23"
 
 
 def test_refresh_recent_matches_snapshot_updates_baseline_stats():

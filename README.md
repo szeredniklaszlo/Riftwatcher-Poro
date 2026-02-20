@@ -29,7 +29,7 @@ It maintains daily and weekly scoreboard messages, posts match recaps, and posts
 - `!Mood` keeps a single scoreboard message updated in `DAILY_REPORT_CHANNEL_ID`.
 - `!Week` keeps a single weekly scoreboard message updated in `WEEKLY_REPORT_CHANNEL_ID`.
 - Daily window starts at `REPORT_DAY_START_HOUR` in `REPORT_TIMEZONE`.
-- Weekly window aggregates existing daily stats from Monday through Friday in `REPORT_TIMEZONE`.
+- Weekly window aggregates existing daily stats from Monday at `REPORT_DAY_START_HOUR` through next Monday at the same hour in `REPORT_TIMEZONE`.
 - Ranked queues tracked in report:
   - Solo/Duo (`420`)
   - Flex (`440`)

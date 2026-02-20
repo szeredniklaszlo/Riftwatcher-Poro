@@ -506,7 +506,7 @@ def db_load_latest_stats(day_date):
     return rows or []
 
 
-def db_load_weekly_stats(start_day_date, end_day_date):
+def db_load_weekly_stats(start_day_date, end_day_date_exclusive):
     rows = db_execute(
         """
         SELECT
@@ -530,11 +530,11 @@ def db_load_weekly_stats(start_day_date, end_day_date):
             COALESCE(SUM(deaths), 0) AS deaths,
             COALESCE(SUM(vision_score), 0) AS vision_score
         FROM player_daily_stats
-        WHERE day_date BETWEEN %s AND %s
+        WHERE day_date >= %s AND day_date < %s
         GROUP BY lower(riot_id)
         ORDER BY lower(MIN(riot_id));
         """,
-        (start_day_date, end_day_date),
+        (start_day_date, end_day_date_exclusive),
         fetch=True,
     )
     return rows or []
