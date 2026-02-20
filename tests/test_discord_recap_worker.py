@@ -334,3 +334,71 @@ def test_process_recap_cycle_skips_remake_notifications_and_sync():
     assert state[_state_key("Alpha#NA1")] == "EUW1_2"
     assert upserts == []
     assert edit_calls == []
+
+
+def test_process_recap_cycle_batches_multiple_matches_into_single_post():
+    channel = FakeChannel()
+    riot = FakeRiotClient()
+    mood = FakeMoodService()
+    now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+
+    riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a"}
+    riot.recent_ids_by_puuid = {"puuid-a": ["EUW1_2", "EUW1_1", "EUW1_0"]}
+    riot.match_info_by_id = {
+        "EUW1_2": {
+            "info": {
+                "queueId": 420,
+                "gameDuration": 1800,
+                "gameEndTimestamp": now_ms,
+                "participants": [_participant("puuid-a", win=True)],
+            }
+        },
+        "EUW1_1": {
+            "info": {
+                "queueId": 440,
+                "gameDuration": 1700,
+                "gameEndTimestamp": now_ms - 120000,
+                "participants": [_participant("puuid-a", win=False)],
+            }
+        },
+    }
+    riot.mode_records_by_riot_id = {
+        "Alpha#NA1": (
+            {"solo_duo": {"wins": 1, "losses": 1}, "flex": {"wins": 0, "losses": 0}, "arcade": {"wins": 0, "losses": 0}},
+            {"cs_total": 100, "minutes_total": 30.0},
+        ),
+    }
+
+    state = {_state_key("Alpha#NA1"): "EUW1_0"}
+    edit_calls = []
+
+    def db_get_state(key):
+        return state.get(key)
+
+    def db_set_state(key, value):
+        state[key] = value
+
+    async def edit_last_report_message(**kwargs):
+        edit_calls.append(kwargs)
+
+    asyncio.run(
+        process_recap_cycle(
+            friends=["Alpha#NA1"],
+            riot_client=riot,
+            mood_service=mood,
+            report_timezone=timezone.utc,
+            match_recap_channel_id=123,
+            channel=channel,
+            db_enabled=True,
+            db_get_state=db_get_state,
+            db_set_state=db_set_state,
+            db_upsert_daily_stats=lambda *_args, **_kwargs: None,
+            edit_last_report_message=edit_last_report_message,
+            log=lambda _msg: None,
+        )
+    )
+
+    assert len(channel.messages) == 1
+    assert channel.messages[0].count("New Match Recap") == 2
+    assert "\n\n---\n\n" in channel.messages[0]
+    assert edit_calls == [{"bypass_cache": True}]

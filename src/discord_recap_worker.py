@@ -57,6 +57,8 @@ async def process_recap_cycle(
     edit_last_weekly_report_message=None,
     log,
 ):
+    recap_split_spacing_seconds = 3.0
+    recap_section_separator = "\n\n---\n\n"
     puuid_by_riot_id = {}
     recent_ids_by_riot_id = {}
     matches_to_report = set()
@@ -112,6 +114,7 @@ async def process_recap_cycle(
         match_entries.append((end_ts, match_id, queue_id, duration_seconds, tracked_participants))
 
     match_entries.sort(key=lambda row: row[0])
+    recap_sections = []
     for end_ts, match_id, queue_id, duration_seconds, tracked_participants in match_entries:
         queue_name = format_recap_queue_name(queue_id)
         end_local = datetime.fromtimestamp(end_ts, tz=report_timezone)
@@ -126,11 +129,34 @@ async def process_recap_cycle(
             lines.append(format_recap_player_line(riot_id, participant, duration_seconds))
             if index < len(ordered_participants) - 1:
                 lines.append("")
-        message = "\n".join(lines)
-        if len(message) > 2000:
-            message = message[:1950] + "\n..."
-        await channel.send(message)
-        log(f"[recap] Posted new match recap for {match_id} in channel {match_recap_channel_id}.")
+        recap_sections.append("\n".join(lines))
+        log(f"[recap] Prepared new match recap for {match_id} in channel {match_recap_channel_id}.")
+
+    recap_messages = []
+    current_sections = []
+    for section in recap_sections:
+        candidate = recap_section_separator.join(current_sections + [section]) if current_sections else section
+        if len(candidate) <= 2000:
+            current_sections.append(section)
+            continue
+        if current_sections:
+            recap_messages.append(recap_section_separator.join(current_sections))
+            current_sections = [section]
+            continue
+        recap_messages.append(section[:1950] + "\n...")
+
+    if current_sections:
+        recap_messages.append(recap_section_separator.join(current_sections))
+
+    for index, recap_message in enumerate(recap_messages):
+        await channel.send(recap_message)
+        if index < len(recap_messages) - 1:
+            await asyncio.sleep(recap_split_spacing_seconds)
+    if recap_messages:
+        log(
+            f"[recap] Posted recap batch in channel {match_recap_channel_id}: "
+            f"matches={len(recap_sections)} messages={len(recap_messages)}."
+        )
 
     affected_riot_ids = set()
     for _end_ts, _match_id, _queue_id, _duration_seconds, tracked_participants in match_entries:
