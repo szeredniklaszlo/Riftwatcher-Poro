@@ -4,7 +4,53 @@ from datetime import timedelta
 import discord
 import requests
 
-from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, MOOD_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND, WEEK_COMMAND
+from src.constants import (
+    ADD_COMMAND,
+    DEBUG_PLAYER_COMMAND,
+    HEALTH_COMMAND,
+    HELP_COMMAND,
+    MOOD_COMMAND,
+    RIOT_TEST_COMMAND,
+    TEST_COMMAND,
+    WEEK_COMMAND,
+)
+
+
+def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_id):
+    daily_channel_ref = f"<#{daily_channel_id}>"
+    weekly_channel_ref = f"<#{weekly_channel_id}>" if weekly_channel_id else daily_channel_ref
+    return (
+        "**MoodBot commands**\n"
+        f"- `{MOOD_COMMAND}`: Refresh daily scoreboard (games since `{report_day_start_hour:02d}:00`).\n"
+        f"- `{WEEK_COMMAND}`: Refresh weekly scoreboard for Monday `{report_day_start_hour:02d}:00` -> next Monday "
+        f"`{report_day_start_hour:02d}:00` (posted in {weekly_channel_ref}).\n"
+        f"- `{ADD_COMMAND} Name#Tag`: Add a tracked Riot ID.\n"
+        f"- `{DEBUG_PLAYER_COMMAND} Name#Tag`: Show queue/window debug details.\n"
+        f"- `{HEALTH_COMMAND}`: Show bot/DB/cache health.\n"
+        f"- `{RIOT_TEST_COMMAND}`: Verify Riot API connectivity.\n"
+        f"- `{TEST_COMMAND}`: Verify Discord send permissions.\n"
+        f"- `{HELP_COMMAND}`: Show this help.\n"
+        f"Use commands in {daily_channel_ref}."
+    )
+
+
+def is_supported_command(content_lower):
+    known_exact = {
+        TEST_COMMAND.casefold(),
+        RIOT_TEST_COMMAND.casefold(),
+        MOOD_COMMAND.casefold(),
+        WEEK_COMMAND.casefold(),
+        ADD_COMMAND.casefold(),
+        DEBUG_PLAYER_COMMAND.casefold(),
+        HEALTH_COMMAND.casefold(),
+        HELP_COMMAND.casefold(),
+    }
+    if content_lower in known_exact:
+        return True
+    return (
+        content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
+        or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
+    )
 
 
 async def handle_incoming_message(
@@ -33,15 +79,35 @@ async def handle_incoming_message(
 ):
     content = message.content.strip()
     content_lower = content.casefold()
+    weekly_channel_id = weekly_report_channel_id or channel_id
 
-    if content == TEST_COMMAND:
+    if message.channel.id != channel_id:
+        if content.startswith("!") and is_supported_command(content_lower):
+            await message.channel.send(
+                f"Use MoodBot commands in <#{channel_id}>. Run `{HELP_COMMAND}` there for usage."
+            )
+        return
+
+    if content_lower == HELP_COMMAND.casefold():
+        await message.channel.send(
+            format_help_text(
+                report_day_start_hour=report_day_start_hour,
+                daily_channel_id=channel_id,
+                weekly_channel_id=weekly_channel_id,
+            )
+        )
+        return
+
+    if content_lower == TEST_COMMAND.casefold():
         await message.channel.send("API test: MoodBot is online and can send messages.")
         log(f"[test] Sent API test message in channel {channel_id}.")
         return
 
-    if content == RIOT_TEST_COMMAND:
+    if content_lower == RIOT_TEST_COMMAND.casefold():
         if not friends:
-            await message.channel.send("Riot API test skipped: no tracked players in database. Add one with `!Add Name#Tag`.")
+            await message.channel.send(
+                f"Riot API test skipped: no tracked players in database. Add one with `{ADD_COMMAND} Name#Tag`."
+            )
             return
         try:
             riot_id, puuid, match_count = await riot_client.run_riot_connectivity_test(friends[0])
@@ -71,7 +137,7 @@ async def handle_incoming_message(
         return
 
     if content_lower == DEBUG_PLAYER_COMMAND.casefold():
-        await message.channel.send("Usage: `!DebugPlayer Name#Tag`")
+        await message.channel.send(f"Usage: `{DEBUG_PLAYER_COMMAND} Name#Tag`")
         return
 
     if content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} "):
@@ -103,7 +169,7 @@ async def handle_incoming_message(
 
         try:
             if mood_request_lock.locked():
-                await message.channel.send("\u23F3 A mood report is already in progress. Please wait for it to finish.")
+                await message.channel.send("\u23F3 Another report is already in progress. Please wait.")
                 return
 
             async with mood_request_lock:
@@ -168,7 +234,7 @@ async def handle_incoming_message(
 
         try:
             if mood_request_lock.locked():
-                await message.channel.send("\u23F3 A report is already in progress. Please wait for it to finish.")
+                await message.channel.send("\u23F3 Another report is already in progress. Please wait.")
                 return
 
             async with mood_request_lock:
@@ -182,7 +248,11 @@ async def handle_incoming_message(
                         await message.channel.send("Weekly report failed: could not access weekly report channel.")
                         return
                     target_channel = resolved_channel
-                loading_text = "\u23F3 Building weekly report (Monday 06:00 -> next Monday 06:00) from stored stats..."
+                loading_text = (
+                    "\u23F3 Building weekly report "
+                    f"(Monday {report_day_start_hour:02d}:00 -> next Monday {report_day_start_hour:02d}:00) "
+                    "from stored stats..."
+                )
                 status_message = await get_or_create_weekly_report_message(target_channel, loading_text)
                 if status_message.content != loading_text:
                     await status_message.edit(content=loading_text)
@@ -200,7 +270,7 @@ async def handle_incoming_message(
         return
 
     if content_lower == ADD_COMMAND.casefold():
-        await message.channel.send("Usage: `!Add Name#Tag`")
+        await message.channel.send(f"Usage: `{ADD_COMMAND} Name#Tag`")
         return
 
     if content_lower.startswith(f"{ADD_COMMAND.casefold()} "):

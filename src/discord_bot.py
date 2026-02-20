@@ -630,8 +630,6 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
-    if message.channel.id != DAILY_REPORT_CHANNEL_ID:
-        return
     await handle_incoming_message(
         message=message,
         channel_id=DAILY_REPORT_CHANNEL_ID,

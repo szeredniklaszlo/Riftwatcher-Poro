@@ -203,3 +203,108 @@ def test_handle_week_command_updates_weekly_scoreboard_message():
     assert incoming.deleted is True
     assert remembered == [status_message]
     assert status_message.content == "weekly report"
+
+
+def test_handle_help_command_shows_usage_and_channels():
+    channel = FakeChannel(channel_id=777)
+    incoming = FakeIncomingMessage("!help", channel)
+    mood_service = FakeMoodService(build_outputs=["unused"])
+    riot_client = FakeRiotClient()
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            channel_id=777,
+            friends=["Alpha#NA1"],
+            riot_client=riot_client,
+            mood_service=mood_service,
+            report_timezone_name="UTC",
+            report_day_start_hour=9,
+            db_enabled=True,
+            start_monotonic=0.0,
+            mood_request_lock=asyncio.Lock(),
+            request_id_context=contextvars.ContextVar("request_id", default=None),
+            create_request_id=lambda _prefix: "help-1234",
+            get_or_create_report_message=lambda _channel, _initial_content: None,
+            remember_report_message=lambda _message: None,
+            normalize_riot_id=lambda riot_id: riot_id,
+            db_upsert_player=lambda _riot_id, _puuid: None,
+            log=lambda _msg: None,
+            weekly_report_channel_id=888,
+        )
+    )
+
+    assert len(channel.sent_messages) == 1
+    help_text = channel.sent_messages[0].content
+    assert "!help" in help_text
+    assert "<#777>" in help_text
+    assert "<#888>" in help_text
+    assert "09:00" in help_text
+
+
+def test_known_command_in_wrong_channel_prompts_to_use_daily_channel():
+    channel = FakeChannel(channel_id=999)
+    incoming = FakeIncomingMessage("!Mood", channel)
+    mood_service = FakeMoodService(build_outputs=["unused"])
+    riot_client = FakeRiotClient()
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            channel_id=777,
+            friends=["Alpha#NA1"],
+            riot_client=riot_client,
+            mood_service=mood_service,
+            report_timezone_name="UTC",
+            report_day_start_hour=6,
+            db_enabled=True,
+            start_monotonic=0.0,
+            mood_request_lock=asyncio.Lock(),
+            request_id_context=contextvars.ContextVar("request_id", default=None),
+            create_request_id=lambda _prefix: "wrong-1234",
+            get_or_create_report_message=lambda _channel, _initial_content: None,
+            remember_report_message=lambda _message: None,
+            normalize_riot_id=lambda riot_id: riot_id,
+            db_upsert_player=lambda _riot_id, _puuid: None,
+            log=lambda _msg: None,
+        )
+    )
+
+    assert len(channel.sent_messages) == 1
+    assert "<#777>" in channel.sent_messages[0].content
+
+
+def test_handle_week_command_loading_text_uses_configured_hour():
+    channel = FakeChannel(channel_id=777)
+    incoming = FakeIncomingMessage("!Week", channel)
+    status_message = FakeStatusMessage(content="old weekly")
+    mood_service = FakeMoodService(build_outputs=["unused"])
+    riot_client = FakeRiotClient()
+
+    async def get_or_create_weekly_report_message(_channel, _initial_content):
+        return status_message
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            channel_id=777,
+            friends=["Alpha#NA1"],
+            riot_client=riot_client,
+            mood_service=mood_service,
+            report_timezone_name="UTC",
+            report_day_start_hour=9,
+            db_enabled=True,
+            start_monotonic=0.0,
+            mood_request_lock=asyncio.Lock(),
+            request_id_context=contextvars.ContextVar("request_id", default=None),
+            create_request_id=lambda _prefix: "week-1234",
+            get_or_create_report_message=lambda _channel, _initial_content: None,
+            remember_report_message=lambda _message: None,
+            normalize_riot_id=lambda riot_id: riot_id,
+            db_upsert_player=lambda _riot_id, _puuid: None,
+            log=lambda _msg: None,
+            get_or_create_weekly_report_message=get_or_create_weekly_report_message,
+        )
+    )
+
+    assert "Monday 09:00 -> next Monday 09:00" in status_message.edits[0]
