@@ -323,7 +323,7 @@ def db_load_backfill_offsets():
         """
         SELECT state_key, state_value
         FROM bot_state
-        WHERE state_key LIKE 'backfill_offset::%';
+        WHERE state_key LIKE 'backfill_offset::%%';
         """,
         fetch=True,
     ) or []
