@@ -5,20 +5,6 @@ import requests
 from src.rank_logic import format_rank_change_message, normalize_queue_type
 
 
-def db_ranked_row_to_entry(row):
-    return {
-        "tier": row[1],
-        "rank_division": row[2],
-        "league_points": int(row[3] or 0),
-        "wins": int(row[4] or 0),
-        "losses": int(row[5] or 0),
-        "hot_streak": bool(row[6]),
-        "veteran": bool(row[7]),
-        "fresh_blood": bool(row[8]),
-        "inactive": bool(row[9]),
-    }
-
-
 async def process_rank_cycle(
     *,
     friends,
@@ -34,8 +20,18 @@ async def process_rank_cycle(
             previous_rows = await asyncio.to_thread(db_load_ranked_state, riot_id)
             previous_by_queue = {}
             for row in previous_rows:
-                queue_type = normalize_queue_type(row[0]) or row[0]
-                previous_by_queue[queue_type] = db_ranked_row_to_entry(row)
+                queue_type = normalize_queue_type(row["queue_type"]) or row["queue_type"]
+                previous_by_queue[queue_type] = {
+                    "tier": row["tier"],
+                    "rank_division": row["rank_division"],
+                    "league_points": int(row["league_points"] or 0),
+                    "wins": int(row["wins"] or 0),
+                    "losses": int(row["losses"] or 0),
+                    "hot_streak": bool(row["hot_streak"]),
+                    "veteran": bool(row["veteran"]),
+                    "fresh_blood": bool(row["fresh_blood"]),
+                    "inactive": bool(row["inactive"]),
+                }
 
             current_entries_raw = await riot_client.fetch_ranked_entries(riot_id)
             current_by_queue = {}

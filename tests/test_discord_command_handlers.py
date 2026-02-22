@@ -60,7 +60,7 @@ class FakeMoodService:
     def invalidate_report_cache(self):
         self.invalidated = True
 
-    async def run_health_check(self, _start_monotonic):
+    async def run_health_check(self, _start_monotonic, worker_stats=None):
         return {
             "uptime_seconds": 1,
             "tracked_players": 1,
@@ -70,6 +70,7 @@ class FakeMoodService:
             "players_with_backfill_offset": 1,
             "max_backfill_offset": 400,
             "top_backfill_offsets": ["Alpha#NA1=400"],
+            "worker_stats": worker_stats,
         }
 
 

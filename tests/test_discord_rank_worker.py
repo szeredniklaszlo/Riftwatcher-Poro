@@ -6,7 +6,19 @@ from src.discord_rank_worker import process_rank_cycle
 
 
 def _row(queue_type, tier, division, lp=0):
-    return (queue_type, tier, division, lp, 0, 0, False, False, False, False, None)
+    return {
+        "queue_type": queue_type,
+        "tier": tier,
+        "rank_division": division,
+        "league_points": lp,
+        "wins": 0,
+        "losses": 0,
+        "hot_streak": False,
+        "veteran": False,
+        "fresh_blood": False,
+        "inactive": False,
+        "updated_at": None,
+    }
 
 
 class FakeChannel:

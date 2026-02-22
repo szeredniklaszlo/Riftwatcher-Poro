@@ -92,6 +92,12 @@ START_MONOTONIC = time.monotonic()
 LAST_CACHE_CLEANUP_AT = 0.0
 RIOT_401_ALERT_SENT = False
 RIOT_ALERT_LOCK = asyncio.Lock()
+WORKER_STATS = {
+    "refresh": {"cycles": 0, "errors": 0},
+    "rank": {"cycles": 0, "errors": 0},
+    "recap": {"cycles": 0, "errors": 0},
+    "backfill": {"cycles": 0, "errors": 0},
+}
 
 
 def load_tracked_players():
@@ -393,7 +399,9 @@ async def background_rank_notifier():
         token = REQUEST_ID_CONTEXT.set(create_request_id("rank"))
         try:
             await evaluate_rank_changes_and_notify()
+            WORKER_STATS["rank"]["cycles"] += 1
         except Exception as exc:
+            WORKER_STATS["rank"]["errors"] += 1
             log(f"[rank] Unexpected background error: {exc}")
         finally:
             REQUEST_ID_CONTEXT.reset(token)
@@ -432,7 +440,9 @@ async def background_match_recap_notifier():
                 edit_last_weekly_report_message=edit_last_weekly_report_message,
                 log=log,
             )
+            WORKER_STATS["recap"]["cycles"] += 1
         except Exception as exc:
+            WORKER_STATS["recap"]["errors"] += 1
             log(f"[recap] Unexpected error: {exc}")
         finally:
             REQUEST_ID_CONTEXT.reset(token)
@@ -474,7 +484,9 @@ async def background_match_cache_backfiller():
                 f"[backfill] Cycle summary: cached={total_backfilled}, "
                 f"active_offsets={active_offsets}/{len(FRIENDS)}, max_offset={max_offset}."
             )
+            WORKER_STATS["backfill"]["cycles"] += 1
         except Exception as exc:
+            WORKER_STATS["backfill"]["errors"] += 1
             log(f"[backfill] Unexpected background error: {exc}")
         finally:
             REQUEST_ID_CONTEXT.reset(token)
@@ -561,7 +573,9 @@ async def background_daily_refresher():
                     f"[refresh] Match cache cleanup complete: deleted={deleted}, "
                     f"retention_days={MATCH_CACHE_RETENTION_DAYS}"
                 )
+            WORKER_STATS["refresh"]["cycles"] += 1
         except Exception as exc:
+            WORKER_STATS["refresh"]["errors"] += 1
             log(f"[refresh] Unexpected error: {exc}")
         finally:
             REQUEST_ID_CONTEXT.reset(token)
@@ -662,6 +676,7 @@ async def on_message(message):
         weekly_report_channel_id=WEEKLY_REPORT_CHANNEL_ID,
         events_channel_id=EVENTS_CHANNEL_ID,
         resolve_channel=resolve_channel,
+        worker_stats=WORKER_STATS,
     )
 
 

@@ -328,6 +328,12 @@ def db_load_backfill_offsets():
     return offsets
 
 
+_RANKED_STATE_COLS = (
+    "queue_type", "tier", "rank_division", "league_points",
+    "wins", "losses", "hot_streak", "veteran", "fresh_blood", "inactive", "updated_at",
+)
+
+
 def db_load_ranked_state(riot_id):
     rows = db_execute(
         """
@@ -341,7 +347,7 @@ def db_load_ranked_state(riot_id):
         (riot_id,),
         fetch=True,
     ) or []
-    return rows
+    return [dict(zip(_RANKED_STATE_COLS, row)) for row in rows]
 
 
 def db_upsert_ranked_state(riot_id, queue_type, entry):
@@ -508,6 +514,14 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=No
     )
 
 
+_LATEST_STATS_COLS = (
+    "riot_id", "solo_wins", "solo_losses", "flex_wins", "flex_losses",
+    "arcade_wins", "arcade_losses", "total_wins", "total_losses", "updated_at",
+    "cs_total", "minutes_total", "objective_damage", "player_damage", "healing",
+    "damage_taken", "kills", "deaths", "vision_score",
+)
+
+
 def db_load_latest_stats(day_date):
     rows = db_execute(
         """
@@ -522,7 +536,7 @@ def db_load_latest_stats(day_date):
         (day_date,),
         fetch=True,
     )
-    return rows or []
+    return [dict(zip(_LATEST_STATS_COLS, row)) for row in rows] if rows else []
 
 
 def db_load_weekly_stats(start_day_date, end_day_date_exclusive):
@@ -556,7 +570,15 @@ def db_load_weekly_stats(start_day_date, end_day_date_exclusive):
         (start_day_date, end_day_date_exclusive),
         fetch=True,
     )
-    return rows or []
+    return [dict(zip(_LATEST_STATS_COLS, row)) for row in rows] if rows else []
+
+
+_DAILY_STATS_PLAYER_COLS = (
+    "solo_wins", "solo_losses", "flex_wins", "flex_losses",
+    "arcade_wins", "arcade_losses", "cs_total", "minutes_total",
+    "objective_damage", "player_damage", "healing", "damage_taken",
+    "kills", "deaths", "vision_score",
+)
 
 
 def db_get_daily_stats_for_player(day_date, riot_id):
@@ -582,4 +604,6 @@ def db_get_daily_stats_for_player(day_date, riot_id):
         (day_date, riot_id),
         fetchone=True,
     )
-    return row
+    if row is None:
+        return None
+    return dict(zip(_DAILY_STATS_PLAYER_COLS, row))

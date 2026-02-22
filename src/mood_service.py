@@ -130,23 +130,23 @@ class MoodService:
         tracked_lookup = {friend.casefold() for friend in tracked_friends}
         ranked_results = []
         for row in rows:
-            riot_id = row[0]
+            riot_id = row["riot_id"]
             if riot_id.casefold() not in tracked_lookup:
                 continue
             mode_records = {
-                "solo_duo": {"wins": row[1], "losses": row[2]},
-                "flex": {"wins": row[3], "losses": row[4]},
+                "solo_duo": {"wins": row["solo_wins"], "losses": row["solo_losses"]},
+                "flex": {"wins": row["flex_wins"], "losses": row["flex_losses"]},
             }
             performance_totals = {
-                "cs_total": int(row[10] or 0),
-                "minutes_total": float(row[11] or 0.0),
-                "objective_damage": int(row[12] or 0),
-                "player_damage": int(row[13] or 0),
-                "healing": int(row[14] or 0),
-                "damage_taken": int(row[15] or 0),
-                "kills": int(row[16] or 0),
-                "deaths": int(row[17] or 0),
-                "vision_score": int(row[18] or 0),
+                "cs_total": int(row["cs_total"] or 0),
+                "minutes_total": float(row["minutes_total"] or 0.0),
+                "objective_damage": int(row["objective_damage"] or 0),
+                "player_damage": int(row["player_damage"] or 0),
+                "healing": int(row["healing"] or 0),
+                "damage_taken": int(row["damage_taken"] or 0),
+                "kills": int(row["kills"] or 0),
+                "deaths": int(row["deaths"] or 0),
+                "vision_score": int(row["vision_score"] or 0),
             }
             wins, losses = get_mode_totals(mode_records)
             total = wins + losses
@@ -170,8 +170,8 @@ class MoodService:
 
         updated_at_by_riot_id = {}
         for row in stored_rows or []:
-            riot_id = row[0]
-            updated_at = row[9] if len(row) > 9 else None
+            riot_id = row["riot_id"]
+            updated_at = row["updated_at"]
             updated_at_by_riot_id[str(riot_id).casefold()] = updated_at
 
         def sort_key(riot_id):
@@ -345,7 +345,7 @@ class MoodService:
                 if not prefer_snapshot:
                     latest_updated_at = None
                     for row in stored_rows:
-                        row_updated_at = row[9]
+                        row_updated_at = row["updated_at"]
                         if row_updated_at is None:
                             continue
                         if latest_updated_at is None or row_updated_at > latest_updated_at:
@@ -544,19 +544,19 @@ class MoodService:
                     continue
 
                 mode_records = {
-                    "solo_duo": {"wins": int(row[0]), "losses": int(row[1])},
-                    "flex": {"wins": int(row[2]), "losses": int(row[3])},
+                    "solo_duo": {"wins": int(row["solo_wins"]), "losses": int(row["solo_losses"])},
+                    "flex": {"wins": int(row["flex_wins"]), "losses": int(row["flex_losses"])},
                 }
                 performance_totals = {
-                    "cs_total": int(row[6] or 0),
-                    "minutes_total": float(row[7] or 0.0),
-                    "objective_damage": int(row[8] or 0),
-                    "player_damage": int(row[9] or 0),
-                    "healing": int(row[10] or 0),
-                    "damage_taken": int(row[11] or 0),
-                    "kills": int(row[12] or 0),
-                    "deaths": int(row[13] or 0),
-                    "vision_score": int(row[14] or 0),
+                    "cs_total": int(row["cs_total"] or 0),
+                    "minutes_total": float(row["minutes_total"] or 0.0),
+                    "objective_damage": int(row["objective_damage"] or 0),
+                    "player_damage": int(row["player_damage"] or 0),
+                    "healing": int(row["healing"] or 0),
+                    "damage_taken": int(row["damage_taken"] or 0),
+                    "kills": int(row["kills"] or 0),
+                    "deaths": int(row["deaths"] or 0),
+                    "vision_score": int(row["vision_score"] or 0),
                 }
                 player_changed = False
                 for match_id in reversed(new_match_ids):
@@ -602,7 +602,7 @@ class MoodService:
         if changed_any:
             self.invalidate_report_cache()
 
-    async def run_health_check(self, start_monotonic):
+    async def run_health_check(self, start_monotonic, worker_stats=None):
         uptime_seconds = int(time.monotonic() - start_monotonic)
         backfill_offsets = {}
         try:
@@ -635,5 +635,6 @@ class MoodService:
             "players_with_backfill_offset": players_with_backfill_offset,
             "max_backfill_offset": max_backfill_offset,
             "top_backfill_offsets": top_backfill,
+            "worker_stats": worker_stats,
         }
 

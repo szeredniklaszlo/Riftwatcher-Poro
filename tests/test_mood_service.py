@@ -67,27 +67,27 @@ def _create_service(
 
 
 def _stats_row(riot_id, updated_at, *, solo_wins=0, solo_losses=0, flex_wins=0, flex_losses=0):
-    return (
-        riot_id,
-        solo_wins,
-        solo_losses,
-        flex_wins,
-        flex_losses,
-        0,
-        0,
-        solo_wins + flex_wins,
-        solo_losses + flex_losses,
-        updated_at,
-        0,
-        0.0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-    )
+    return {
+        "riot_id": riot_id,
+        "solo_wins": solo_wins,
+        "solo_losses": solo_losses,
+        "flex_wins": flex_wins,
+        "flex_losses": flex_losses,
+        "arcade_wins": 0,
+        "arcade_losses": 0,
+        "total_wins": solo_wins + flex_wins,
+        "total_losses": solo_losses + flex_losses,
+        "updated_at": updated_at,
+        "cs_total": 0,
+        "minutes_total": 0.0,
+        "objective_damage": 0,
+        "player_damage": 0,
+        "healing": 0,
+        "damage_taken": 0,
+        "kills": 0,
+        "deaths": 0,
+        "vision_score": 0,
+    }
 
 
 def test_get_new_match_ids_when_last_seen_present():
@@ -233,27 +233,27 @@ def test_build_report_uses_snapshot_when_only_one_player_has_ranked_games():
 def test_build_weekly_report_aggregates_full_week_rows():
     riot = FakeRiotClient()
     weekly_rows = [
-        (
-            "Alpha#NA1",
-            3,
-            1,
-            2,
-            0,
-            0,
-            0,
-            5,
-            1,
-            datetime.now(tz=timezone.utc),
-            500,
-            100.0,
-            1000,
-            2000,
-            300,
-            4000,
-            20,
-            10,
-            30,
-        )
+        {
+            "riot_id": "Alpha#NA1",
+            "solo_wins": 3,
+            "solo_losses": 1,
+            "flex_wins": 2,
+            "flex_losses": 0,
+            "arcade_wins": 0,
+            "arcade_losses": 0,
+            "total_wins": 5,
+            "total_losses": 1,
+            "updated_at": datetime.now(tz=timezone.utc),
+            "cs_total": 500,
+            "minutes_total": 100.0,
+            "objective_damage": 1000,
+            "player_damage": 2000,
+            "healing": 300,
+            "damage_taken": 4000,
+            "kills": 20,
+            "deaths": 10,
+            "vision_score": 30,
+        }
     ]
     service = _create_service(
         friends=["Alpha#NA1"],
@@ -345,7 +345,12 @@ def test_refresh_recent_matches_snapshot_updates_baseline_stats():
 
     upserts = []
     last_seen_writes = []
-    baseline_row = (0, 0, 0, 0, 0, 0, 50, 10.0, 100, 200, 30, 40, 1, 1, 2)
+    baseline_row = {
+        "solo_wins": 0, "solo_losses": 0, "flex_wins": 0, "flex_losses": 0,
+        "arcade_wins": 0, "arcade_losses": 0, "cs_total": 50, "minutes_total": 10.0,
+        "objective_damage": 100, "player_damage": 200, "healing": 30,
+        "damage_taken": 40, "kills": 1, "deaths": 1, "vision_score": 2,
+    }
     service = _create_service(
         friends=["Alpha#NA1"],
         riot_client=riot,
@@ -399,7 +404,12 @@ def test_refresh_recent_matches_snapshot_ignores_remakes():
         friends=["Alpha#NA1"],
         riot_client=riot,
         db_get_last_seen_match_id=lambda _riot_id: "m1",
-        db_get_daily_stats_for_player=lambda _cycle_key, _riot_id: (0, 0, 0, 0, 0, 0, 0, 0.0, 0, 0, 0, 0, 0, 0, 0),
+        db_get_daily_stats_for_player=lambda _cycle_key, _riot_id: {
+            "solo_wins": 0, "solo_losses": 0, "flex_wins": 0, "flex_losses": 0,
+            "arcade_wins": 0, "arcade_losses": 0, "cs_total": 0, "minutes_total": 0.0,
+            "objective_damage": 0, "player_damage": 0, "healing": 0, "damage_taken": 0,
+            "kills": 0, "deaths": 0, "vision_score": 0,
+        },
         db_upsert_daily_stats=lambda cycle_key, riot_id, mode_records, performance_totals: upserts.append(
             (cycle_key, riot_id, mode_records, performance_totals)
         ),

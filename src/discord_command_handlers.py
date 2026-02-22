@@ -98,6 +98,7 @@ async def handle_incoming_message(
     weekly_report_channel_id=None,
     events_channel_id=None,
     resolve_channel=None,
+    worker_stats=None,
 ):
     content = message.content.strip()
     content_lower = content.casefold()
@@ -152,9 +153,14 @@ async def handle_incoming_message(
         return
 
     if content_lower == HEALTH_COMMAND.casefold():
-        stats = await mood_service.run_health_check(start_monotonic)
+        stats = await mood_service.run_health_check(start_monotonic, worker_stats=worker_stats)
         uptime = str(timedelta(seconds=stats["uptime_seconds"]))
         top_backfill_offsets = ", ".join(stats.get("top_backfill_offsets", [])) or "none"
+        wstats = stats.get("worker_stats") or {}
+        workers_line = ""
+        if wstats:
+            parts = [f"{k}: {v['cycles']}ok/{v['errors']}err" for k, v in wstats.items()]
+            workers_line = f"\n- Workers: `{' | '.join(parts)}`"
         await message.channel.send(
             (
                 f"Health OK\n"
@@ -166,6 +172,7 @@ async def handle_incoming_message(
                 f"- Backfill cursors active: `{stats.get('players_with_backfill_offset', 0)}/{stats['tracked_players']}`\n"
                 f"- Backfill max offset: `{stats.get('max_backfill_offset', 0)}`\n"
                 f"- Backfill top offsets: `{top_backfill_offsets}`"
+                f"{workers_line}"
             )
         )
         log("[health] Sent health status message.")
