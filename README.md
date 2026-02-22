@@ -3,6 +3,12 @@
 MoodBot is a Discord bot for tracking ranked League of Legends performance for a list of tracked Riot IDs.
 It maintains daily and weekly scoreboard messages, posts match recaps, and posts rank up/down alerts.
 
+## Disclaimer
+
+MoodBot is an independent community project and is not endorsed by, directly affiliated with, maintained, authorized, or sponsored by Riot Games.
+Riot Games, League of Legends, and all associated properties are trademarks or registered trademarks of Riot Games, Inc.
+This project does not use Riot's official logos.
+
 ## Runtime Entry
 
 - Run locally: `python -m src.app`
