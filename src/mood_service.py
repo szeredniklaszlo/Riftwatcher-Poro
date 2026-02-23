@@ -667,6 +667,16 @@ class MoodService:
         top_backfill = sorted(tracked_offsets, key=lambda row: (-row[1], row[0].casefold()))
         top_backfill = [f"{riot_id}={offset}" for riot_id, offset in top_backfill if offset > 0][:3]
 
+        baseline_roles = 0
+        baseline_samples = 0
+        baseline_age_seconds = None
+        if self._role_baselines is not None:
+            baseline_roles = len(self._role_baselines)
+            baseline_samples = sum(
+                len(v) for stats in self._role_baselines.values() for v in stats.values()
+            )
+            baseline_age_seconds = int(time.monotonic() - self._baselines_built_at)
+
         return {
             "uptime_seconds": uptime_seconds,
             "tracked_players": len(self.friends),
@@ -677,5 +687,8 @@ class MoodService:
             "max_backfill_offset": max_backfill_offset,
             "top_backfill_offsets": top_backfill,
             "worker_stats": worker_stats,
+            "baseline_roles": baseline_roles,
+            "baseline_samples": baseline_samples,
+            "baseline_age_seconds": baseline_age_seconds,
         }
 

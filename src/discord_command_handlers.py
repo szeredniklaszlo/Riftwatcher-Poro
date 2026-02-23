@@ -161,6 +161,15 @@ async def handle_incoming_message(
         if wstats:
             parts = [f"{k}: {v['cycles']}ok/{v['errors']}err" for k, v in wstats.items()]
             workers_line = f"\n- Workers: `{' | '.join(parts)}`"
+        baseline_age_seconds = stats.get("baseline_age_seconds")
+        if baseline_age_seconds is None:
+            baseline_line = "\n- Gamer Score baselines: `not yet built`"
+        else:
+            age = str(timedelta(seconds=baseline_age_seconds))
+            baseline_line = (
+                f"\n- Gamer Score baselines: "
+                f"`{stats['baseline_roles']} roles, {stats['baseline_samples']} samples (built {age} ago)`"
+            )
         await message.channel.send(
             (
                 f"Health OK\n"
@@ -172,6 +181,7 @@ async def handle_incoming_message(
                 f"- Backfill cursors active: `{stats.get('players_with_backfill_offset', 0)}/{stats['tracked_players']}`\n"
                 f"- Backfill max offset: `{stats.get('max_backfill_offset', 0)}`\n"
                 f"- Backfill top offsets: `{top_backfill_offsets}`"
+                f"{baseline_line}"
                 f"{workers_line}"
             )
         )
