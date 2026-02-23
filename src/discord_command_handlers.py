@@ -11,6 +11,7 @@ from src.constants import (
     HELP_COMMAND,
     MOOD_COMMAND,
     RIOT_TEST_COMMAND,
+    SCORE_COMMAND,
     TEST_COMMAND,
     WEEK_COMMAND,
 )
@@ -28,6 +29,7 @@ def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_
         f"- `{ADD_COMMAND} Name#Tag`: Add a tracked Riot ID (run in {events_channel_ref}).\n"
         f"- `{DEBUG_PLAYER_COMMAND} Name#Tag`: Show queue/window debug details (run in {events_channel_ref}).\n"
         f"- `{HEALTH_COMMAND}`: Show bot/DB/cache health (run in {events_channel_ref}).\n"
+        f"- `{SCORE_COMMAND}`: Show how each player's Gamer Score is calculated today (run in {events_channel_ref}).\n"
         f"- `{RIOT_TEST_COMMAND}`: Verify Riot API connectivity (run in {events_channel_ref}).\n"
         f"- `{TEST_COMMAND}`: Verify Discord send permissions (run in {events_channel_ref}).\n"
         f"- `{HELP_COMMAND}`: Show this help (run in {events_channel_ref})."
@@ -44,6 +46,7 @@ def is_supported_command(content_lower):
         DEBUG_PLAYER_COMMAND.casefold(),
         HEALTH_COMMAND.casefold(),
         HELP_COMMAND.casefold(),
+        SCORE_COMMAND.casefold(),
     }
     if content_lower in known_exact:
         return True
@@ -66,6 +69,7 @@ def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, ev
             DEBUG_PLAYER_COMMAND.casefold(),
             HEALTH_COMMAND.casefold(),
             HELP_COMMAND.casefold(),
+            SCORE_COMMAND.casefold(),
         }
         or content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
         or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
@@ -186,6 +190,12 @@ async def handle_incoming_message(
             )
         )
         log("[health] Sent health status message.")
+        return
+
+    if content_lower == SCORE_COMMAND.casefold():
+        report = await mood_service.build_score_breakdown_report()
+        await message.channel.send(report)
+        log("[score] Sent score breakdown.")
         return
 
     if content_lower == DEBUG_PLAYER_COMMAND.casefold():

@@ -7,9 +7,12 @@ import requests
 from src.report_logic import (
     accumulate_participant_performance,
     compute_gamer_score,
+    compute_perf_percentile,
     compute_role_baselines,
     derive_primary_role,
     format_mode_line,
+    GAMER_SCORE_PERF_WEIGHT,
+    GAMER_SCORE_WIN_WEIGHT,
     get_match_duration_seconds,
     get_mode_bucket,
     get_mode_totals,
@@ -642,6 +645,91 @@ class MoodService:
                 self.log(f"[refresh] On-demand refresh failed for {riot_id}: {exc}")
         if changed_any:
             self.invalidate_report_cache()
+
+    async def build_score_breakdown_report(self):
+        """Return a human-readable breakdown of how each player's Gamer Score is computed today."""
+        await self._ensure_role_baselines()
+        cycle_key = self.get_cycle_key()
+
+        lines = [
+            "\U0001F3AE **GAMER SCORE** \u2014 how it\u2019s calculated",
+            "",
+            "**Score = win-rate confidence \u00d7 65% + role performance \u00d7 35%**",
+            "Win confidence: Wilson lower bound \u2014 low game counts are penalised.",
+            "Performance: your per-min stats vs same-role players drawn from stored match history.",
+            "",
+        ]
+
+        if not self._role_baselines:
+            lines.append("_Role baselines not yet built \u2014 scores currently reflect win rate only._")
+            lines.append("_Run `!Daily` once to trigger a build._")
+            lines.append("")
+
+        if not self.db_enabled:
+            return "\n".join(lines + ["_DB not enabled \u2014 per-player breakdown unavailable._"])
+
+        stored_rows = await asyncio.to_thread(self.db_load_latest_stats, cycle_key)
+        row_by_key = {str(row["riot_id"]).casefold(): row for row in (stored_rows or [])}
+
+        for riot_id in sorted(self.friends, key=str.casefold):
+            lol_name = get_lol_name(riot_id)
+            row = row_by_key.get(riot_id.casefold())
+            if row is None:
+                lines.append(f"\u26AB  **{lol_name}** \u2014 no data today")
+                continue
+
+            mode_records = {
+                "solo_duo": {"wins": int(row["solo_wins"] or 0), "losses": int(row["solo_losses"] or 0)},
+                "flex": {"wins": int(row["flex_wins"] or 0), "losses": int(row["flex_losses"] or 0)},
+            }
+            wins, losses = get_mode_totals(mode_records)
+            if wins + losses == 0:
+                lines.append(f"\u26AB  **{lol_name}** \u2014 no ranked games today")
+                continue
+
+            performance_totals = {
+                "cs_total": int(row["cs_total"] or 0),
+                "minutes_total": float(row["minutes_total"] or 0.0),
+                "objective_damage": int(row["objective_damage"] or 0),
+                "player_damage": int(row["player_damage"] or 0),
+                "healing": int(row["healing"] or 0),
+                "damage_taken": int(row["damage_taken"] or 0),
+                "kills": int(row["kills"] or 0),
+                "deaths": int(row["deaths"] or 0),
+                "vision_score": int(row["vision_score"] or 0),
+            }
+            primary_role = str(row.get("primary_role") or "").upper() or None
+            win_rate = (wins / (wins + losses)) * 100
+            wilson = wilson_lower_bound(wins, losses)
+            win_pts = wilson * GAMER_SCORE_WIN_WEIGHT * 100
+            gamer_score = compute_gamer_score(wins, losses, performance_totals, primary_role, self._role_baselines)
+
+            role_label = primary_role or "?"
+            minutes = float(performance_totals["minutes_total"])
+            if self._role_baselines and primary_role and minutes > 0:
+                perf_per_min = {
+                    "cs_per_min": performance_totals["cs_total"] / minutes,
+                    "player_damage_per_min": performance_totals["player_damage"] / minutes,
+                    "objective_damage_per_min": performance_totals["objective_damage"] / minutes,
+                    "healing_per_min": performance_totals["healing"] / minutes,
+                    "damage_taken_per_min": performance_totals["damage_taken"] / minutes,
+                    "kills_per_min": performance_totals["kills"] / minutes,
+                    "deaths_per_min": performance_totals["deaths"] / minutes,
+                    "vision_per_min": performance_totals["vision_score"] / minutes,
+                }
+                perf = compute_perf_percentile(perf_per_min, primary_role, self._role_baselines)
+                perf_pts = perf * GAMER_SCORE_PERF_WEIGHT * 100
+                perf_str = f"perf vs {role_label}: `{int(perf * 100)}th pct` \u2192 `{perf_pts:.1f}`"
+            else:
+                reason = "no baseline" if not self._role_baselines else "role unknown"
+                perf_str = f"perf: `N/A ({reason})`"
+
+            lines.append(
+                f"**{lol_name}**  `{role_label}`  \u2192  Score: **{gamer_score:.1f}**\n"
+                f"   `{wins}W\u2011{losses}L` ({win_rate:.1f}% wr) \u2192 win pts: `{win_pts:.1f}` | {perf_str}"
+            )
+
+        return "\n".join(lines)
 
     async def run_health_check(self, start_monotonic, worker_stats=None):
         uptime_seconds = int(time.monotonic() - start_monotonic)
