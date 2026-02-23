@@ -5,3 +5,4 @@ __pycache__/
 pytest-cache-files-*/
 bot.env
 AGENTS.md
+.claude/
