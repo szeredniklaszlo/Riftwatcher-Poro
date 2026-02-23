@@ -11,7 +11,7 @@ from src.discord_text import (
     match_recap_state_key,
     streak_callout_state_key,
 )
-from src.report_logic import get_match_duration_seconds, get_match_end_unix_seconds, get_mode_bucket, is_remake_match
+from src.report_logic import derive_primary_role, get_match_duration_seconds, get_match_end_unix_seconds, get_mode_bucket, is_remake_match
 
 
 async def get_ranked_streak_info(riot_client, puuid, recent_ids, max_matches=8):
@@ -229,12 +229,14 @@ async def process_recap_cycle(
 
         for riot_id in sorted(affected_riot_ids, key=str.casefold):
             mode_records, performance_totals = await riot_client.get_today_mode_records(riot_id)
+            primary_role = derive_primary_role(performance_totals)
             await asyncio.to_thread(
                 db_upsert_daily_stats,
                 cycle_key,
                 riot_id,
                 mode_records,
                 performance_totals,
+                primary_role,
             )
 
         mood_service.invalidate_report_cache()

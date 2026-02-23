@@ -148,6 +148,7 @@ def init_db():
         ON player_daily_stats (day_date, lower(riot_id), updated_at DESC);
         """
     )
+    db_execute("ALTER TABLE player_daily_stats ADD COLUMN IF NOT EXISTS primary_role TEXT NULL;")
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS match_info_cache (
@@ -433,7 +434,7 @@ def db_load_tracked_players():
     return [row[0] for row in rows]
 
 
-def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=None):
+def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=None, primary_role=None):
     solo_wins = mode_records["solo_duo"]["wins"]
     solo_losses = mode_records["solo_duo"]["losses"]
     flex_wins = mode_records["flex"]["wins"]
@@ -452,6 +453,7 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=No
     kills = int(stats.get("kills", 0) or 0)
     deaths = int(stats.get("deaths", 0) or 0)
     vision_score = int(stats.get("vision_score", 0) or 0)
+    role = str(primary_role).upper() if primary_role else None
     db_execute(
         """
         INSERT INTO player_daily_stats (
@@ -463,11 +465,12 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=No
             cs_total, minutes_total,
             objective_damage, player_damage, healing, damage_taken,
             kills, deaths, vision_score,
+            primary_role,
             updated_at
         )
         VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
         )
         ON CONFLICT (day_date, riot_id)
         DO UPDATE SET
@@ -488,6 +491,7 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=No
             kills = EXCLUDED.kills,
             deaths = EXCLUDED.deaths,
             vision_score = EXCLUDED.vision_score,
+            primary_role = COALESCE(EXCLUDED.primary_role, player_daily_stats.primary_role),
             updated_at = NOW();
         """,
         (
@@ -510,6 +514,7 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=No
             kills,
             deaths,
             vision_score,
+            role,
         ),
     )
 
@@ -518,7 +523,7 @@ _LATEST_STATS_COLS = (
     "riot_id", "solo_wins", "solo_losses", "flex_wins", "flex_losses",
     "arcade_wins", "arcade_losses", "total_wins", "total_losses", "updated_at",
     "cs_total", "minutes_total", "objective_damage", "player_damage", "healing",
-    "damage_taken", "kills", "deaths", "vision_score",
+    "damage_taken", "kills", "deaths", "vision_score", "primary_role",
 )
 
 
@@ -528,7 +533,8 @@ def db_load_latest_stats(day_date):
         SELECT DISTINCT ON (lower(riot_id))
             riot_id, solo_wins, solo_losses, flex_wins, flex_losses,
             arcade_wins, arcade_losses, total_wins, total_losses, updated_at,
-            cs_total, minutes_total, objective_damage, player_damage, healing, damage_taken, kills, deaths, vision_score
+            cs_total, minutes_total, objective_damage, player_damage, healing, damage_taken,
+            kills, deaths, vision_score, primary_role
         FROM player_daily_stats
         WHERE day_date = %s
         ORDER BY lower(riot_id), updated_at DESC;
@@ -577,7 +583,7 @@ _DAILY_STATS_PLAYER_COLS = (
     "solo_wins", "solo_losses", "flex_wins", "flex_losses",
     "arcade_wins", "arcade_losses", "cs_total", "minutes_total",
     "objective_damage", "player_damage", "healing", "damage_taken",
-    "kills", "deaths", "vision_score",
+    "kills", "deaths", "vision_score", "primary_role",
 )
 
 
@@ -596,7 +602,8 @@ def db_get_daily_stats_for_player(day_date, riot_id):
             damage_taken,
             kills,
             deaths,
-            vision_score
+            vision_score,
+            primary_role
         FROM player_daily_stats
         WHERE day_date = %s AND lower(riot_id) = lower(%s)
         LIMIT 1;
@@ -607,3 +614,20 @@ def db_get_daily_stats_for_player(day_date, riot_id):
     if row is None:
         return None
     return dict(zip(_DAILY_STATS_PLAYER_COLS, row))
+
+
+def db_load_match_payloads_for_baseline(limit=5000):
+    rows = db_execute(
+        "SELECT payload FROM match_info_cache ORDER BY updated_at DESC LIMIT %s;",
+        (int(limit),),
+        fetch=True,
+    ) or []
+    result = []
+    for (payload_text,) in rows:
+        if not payload_text:
+            continue
+        try:
+            result.append(json.loads(payload_text))
+        except json.JSONDecodeError:
+            continue
+    return result

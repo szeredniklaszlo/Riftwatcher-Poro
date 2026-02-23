@@ -73,6 +73,7 @@ db_get_daily_stats_for_player = dbm.db_get_daily_stats_for_player
 db_load_latest_stats = dbm.db_load_latest_stats
 db_load_weekly_stats = dbm.db_load_weekly_stats
 db_load_backfill_offsets = dbm.db_load_backfill_offsets
+db_load_match_payloads_for_baseline = dbm.db_load_match_payloads_for_baseline
 db_load_ranked_state = dbm.db_load_ranked_state
 db_load_tracked_players = dbm.db_load_tracked_players
 db_delete_ranked_state_queue = dbm.db_delete_ranked_state_queue
@@ -206,6 +207,7 @@ mood_service = MoodService(
     db_set_last_seen_match_id=db_set_last_seen_match_id,
     db_health_stats=db_health_stats,
     db_load_backfill_offsets=db_load_backfill_offsets,
+    db_load_match_payloads_for_baseline=db_load_match_payloads_for_baseline,
 )
 
 

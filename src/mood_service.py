@@ -6,6 +6,9 @@ import requests
 
 from src.report_logic import (
     accumulate_participant_performance,
+    compute_gamer_score,
+    compute_role_baselines,
+    derive_primary_role,
     format_mode_line,
     get_match_duration_seconds,
     get_mode_bucket,
@@ -20,6 +23,8 @@ from src.riot_api import get_lol_name
 
 
 class MoodService:
+    BASELINE_TTL_SECONDS = 12 * 3600
+
     LEADERBOARD_BADGES = (
         ("cs_per_min", "\U0001F33E"),
         ("objective_damage", "\U0001F3F0"),
@@ -50,6 +55,7 @@ class MoodService:
         db_set_last_seen_match_id,
         db_health_stats,
         db_load_backfill_offsets=None,
+        db_load_match_payloads_for_baseline=None,
     ):
         self.log = log
         self.friends = friends
@@ -67,6 +73,9 @@ class MoodService:
         self.db_set_last_seen_match_id = db_set_last_seen_match_id
         self.db_health_stats = db_health_stats
         self.db_load_backfill_offsets = db_load_backfill_offsets or (lambda: {})
+        self.db_load_match_payloads_for_baseline = db_load_match_payloads_for_baseline
+        self._role_baselines = None
+        self._baselines_built_at = 0.0
         self.report_cache = {"text": None, "expires_at": 0.0, "day": None}
         self.weekly_report_cache = {"text": None, "expires_at": 0.0, "window": None}
 
@@ -77,6 +86,26 @@ class MoodService:
         self.weekly_report_cache["text"] = None
         self.weekly_report_cache["window"] = None
         self.weekly_report_cache["expires_at"] = 0.0
+
+    async def _ensure_role_baselines(self):
+        if self.db_load_match_payloads_for_baseline is None:
+            return
+        now = time.monotonic()
+        if self._role_baselines is not None and (now - self._baselines_built_at) < self.BASELINE_TTL_SECONDS:
+            return
+        try:
+            match_payloads = await asyncio.to_thread(self.db_load_match_payloads_for_baseline, 5000)
+            self._role_baselines = compute_role_baselines(match_payloads)
+            self._baselines_built_at = now
+            total_samples = sum(
+                len(v) for stats in self._role_baselines.values() for v in stats.values()
+            )
+            self.log(
+                f"[mood] Role baselines built: roles={len(self._role_baselines)} "
+                f"matches={len(match_payloads)} samples={total_samples}"
+            )
+        except Exception as exc:
+            self.log(f"[mood] Failed to build role baselines: {exc}")
 
     @staticmethod
     def append_mode_line_if_games(report_lines, label, wins, losses):
@@ -126,7 +155,7 @@ class MoodService:
         return week_start_date, week_end_exclusive_date
 
     @staticmethod
-    def rows_to_ranked_results(rows, tracked_friends):
+    def rows_to_ranked_results(rows, tracked_friends, baselines=None):
         tracked_lookup = {friend.casefold() for friend in tracked_friends}
         ranked_results = []
         for row in rows:
@@ -153,7 +182,11 @@ class MoodService:
             if total == 0:
                 continue
             win_rate = (wins / total) * 100
-            ranked_results.append((get_lol_name(riot_id), mode_records, wins, losses, win_rate, performance_totals))
+            primary_role = str(row.get("primary_role") or "").upper() or None
+            gamer_score = compute_gamer_score(wins, losses, performance_totals, primary_role, baselines)
+            ranked_results.append(
+                (get_lol_name(riot_id), mode_records, wins, losses, win_rate, performance_totals, gamer_score)
+            )
         ranked_results.sort(key=rank_sort_key)
         return ranked_results
 
@@ -241,9 +274,9 @@ class MoodService:
             return "\n".join(report_lines)
 
         badges_by_player = self.get_leader_badges_by_player(ranked_results)
-        for index, (lol_name, mode_records, wins, losses, win_rate, _performance) in enumerate(ranked_results):
+        for index, (lol_name, mode_records, wins, losses, win_rate, _performance, *rest) in enumerate(ranked_results):
             wilson_score = wilson_lower_bound(wins, losses)
-            gamer_score = wilson_score * 100
+            gamer_score = rest[0] if rest else wilson_score * 100
             if wins + losses > 0 and wilson_score <= 0:
                 mood_emoji = "\U0001F480"
             elif wilson_score >= 0.75:
@@ -300,7 +333,7 @@ class MoodService:
             return report_text
 
         compact_lines = [f"\u2728------ **LEAGUE MOOD ({header_title})** ------\u2728", ""]
-        for index, (lol_name, _mode_records, wins, losses, win_rate, _performance) in enumerate(ranked_results):
+        for index, (lol_name, _mode_records, wins, losses, win_rate, _performance, *_rest) in enumerate(ranked_results):
             display_emoji = "\u2B50" if index == 0 else "\U0001F642"
             badges = "".join(badges_by_player.get(lol_name, []))
             badges_suffix = f" {badges}" if badges else ""
@@ -335,6 +368,7 @@ class MoodService:
             self.log("[mood] Returning cached report.")
             return self.report_cache["text"]
 
+        await self._ensure_role_baselines()
         report_start = time.perf_counter()
         ranked_results = []
         error_results = []
@@ -363,7 +397,7 @@ class MoodService:
                         stored_rows = []
 
             if stored_rows:
-                ranked_results = self.rows_to_ranked_results(stored_rows, self.friends)
+                ranked_results = self.rows_to_ranked_results(stored_rows, self.friends, baselines=self._role_baselines)
                 if ranked_results or prefer_snapshot:
                     self.log("[mood] Returning report from postgres daily stats.")
                     report_text = self.format_report_from_results(ranked_results, error_results, report_start)
@@ -400,12 +434,14 @@ class MoodService:
 
             wins, losses = get_mode_totals(mode_records)
             total = wins + losses
+            primary_role = derive_primary_role(performance_totals)
             await asyncio.to_thread(
                 self.db_upsert_daily_stats,
                 cycle_key,
                 riot_id,
                 mode_records,
                 performance_totals,
+                primary_role,
             )
             if total == 0:
                 processed_players += 1
@@ -414,7 +450,8 @@ class MoodService:
                 continue
 
             win_rate = (wins / total) * 100
-            ranked_results.append((lol_name, mode_records, wins, losses, win_rate, performance_totals))
+            gamer_score = compute_gamer_score(wins, losses, performance_totals, primary_role, self._role_baselines)
+            ranked_results.append((lol_name, mode_records, wins, losses, win_rate, performance_totals, gamer_score))
             processed_players += 1
             if progress_callback is not None:
                 await progress_callback(processed_players, total_players, lol_name)
@@ -480,12 +517,14 @@ class MoodService:
         for riot_id in ordered_players:
             try:
                 mode_records, performance_totals = await self.riot_client.get_today_mode_records(riot_id)
+                primary_role = derive_primary_role(performance_totals)
                 await asyncio.to_thread(
                     self.db_upsert_daily_stats,
                     cycle_key,
                     riot_id,
                     mode_records,
                     performance_totals,
+                    primary_role,
                 )
             except requests.RequestException as exc:
                 self.log(f"[refresh] Failed for {riot_id}: {exc}")
@@ -532,12 +571,14 @@ class MoodService:
                         "running full player refresh fallback."
                     )
                     mode_records, performance_totals = await self.riot_client.get_today_mode_records(riot_id)
+                    primary_role = derive_primary_role(performance_totals)
                     await asyncio.to_thread(
                         self.db_upsert_daily_stats,
                         cycle_key,
                         riot_id,
                         mode_records,
                         performance_totals,
+                        primary_role,
                     )
                     await asyncio.to_thread(self.db_set_last_seen_match_id, riot_id, latest_match_id)
                     changed_any = True

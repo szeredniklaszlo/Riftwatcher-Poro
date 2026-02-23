@@ -132,7 +132,7 @@ def test_process_recap_cycle_posts_recap_and_syncs_affected_players():
     def db_set_state(key, value):
         state[key] = value
 
-    def db_upsert_daily_stats(cycle_key, riot_id, mode_records, performance_totals):
+    def db_upsert_daily_stats(cycle_key, riot_id, mode_records, performance_totals, primary_role=None):
         upserts.append((cycle_key, riot_id, mode_records, performance_totals))
 
     async def edit_last_report_message(**kwargs):
@@ -255,7 +255,7 @@ def test_process_recap_cycle_no_new_matches_skips_post_and_sync():
     def db_set_state(key, value):
         state[key] = value
 
-    def db_upsert_daily_stats(cycle_key, riot_id, mode_records, performance_totals):
+    def db_upsert_daily_stats(cycle_key, riot_id, mode_records, performance_totals, primary_role=None):
         upserts.append((cycle_key, riot_id, mode_records, performance_totals))
 
     async def edit_last_report_message(**kwargs):

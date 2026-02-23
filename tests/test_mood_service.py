@@ -63,6 +63,7 @@ def _create_service(
         db_get_last_seen_match_id=db_get_last_seen_match_id,
         db_set_last_seen_match_id=db_set_last_seen_match_id,
         db_health_stats=lambda: {"db_ok": True, "match_cache_entries": 0},
+        db_load_match_payloads_for_baseline=lambda _limit: [],
     )
 
 
@@ -87,6 +88,7 @@ def _stats_row(riot_id, updated_at, *, solo_wins=0, solo_losses=0, flex_wins=0, 
         "kills": 0,
         "deaths": 0,
         "vision_score": 0,
+        "primary_role": None,
     }
 
 
@@ -356,7 +358,7 @@ def test_refresh_recent_matches_snapshot_updates_baseline_stats():
         riot_client=riot,
         db_get_last_seen_match_id=lambda _riot_id: "m1",
         db_get_daily_stats_for_player=lambda _cycle_key, _riot_id: baseline_row,
-        db_upsert_daily_stats=lambda cycle_key, riot_id, mode_records, performance_totals: upserts.append(
+        db_upsert_daily_stats=lambda cycle_key, riot_id, mode_records, performance_totals, primary_role=None: upserts.append(
             (cycle_key, riot_id, mode_records, performance_totals)
         ),
         db_set_last_seen_match_id=lambda riot_id, match_id: last_seen_writes.append((riot_id, match_id)),
@@ -410,7 +412,7 @@ def test_refresh_recent_matches_snapshot_ignores_remakes():
             "objective_damage": 0, "player_damage": 0, "healing": 0, "damage_taken": 0,
             "kills": 0, "deaths": 0, "vision_score": 0,
         },
-        db_upsert_daily_stats=lambda cycle_key, riot_id, mode_records, performance_totals: upserts.append(
+        db_upsert_daily_stats=lambda cycle_key, riot_id, mode_records, performance_totals, primary_role=None: upserts.append(
             (cycle_key, riot_id, mode_records, performance_totals)
         ),
     )
@@ -450,7 +452,7 @@ def test_refresh_recent_matches_snapshot_falls_back_when_baseline_missing():
         riot_client=riot,
         db_get_last_seen_match_id=lambda _riot_id: "m1",
         db_get_daily_stats_for_player=lambda _cycle_key, _riot_id: None,
-        db_upsert_daily_stats=lambda cycle_key, riot_id, mode_records, performance_totals: upserts.append(
+        db_upsert_daily_stats=lambda cycle_key, riot_id, mode_records, performance_totals, primary_role=None: upserts.append(
             (cycle_key, riot_id, mode_records, performance_totals)
         ),
         db_set_last_seen_match_id=lambda riot_id, match_id: last_seen_writes.append((riot_id, match_id)),
