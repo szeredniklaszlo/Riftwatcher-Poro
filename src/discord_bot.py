@@ -249,6 +249,29 @@ def remember_weekly_report_message(message):
             db_set_last_weekly_report_message(message.channel.id, message.id)
 
 
+def build_previous_day_placeholder_text():
+    return (
+        "✨------ **LEAGUE MOOD (PREVIOUS DAY)** ------✨\n\n"
+        "No previous-day snapshot available yet.\n\n"
+        "✨--------------------------------------------✨"
+    )
+
+
+def format_previous_day_report_text(report_text, cycle_key):
+    title = "PREVIOUS DAY"
+    try:
+        day_label = datetime.fromisoformat(str(cycle_key)).strftime("%d.%m.%Y")
+        title = f"PREVIOUS DAY - {day_label}"
+    except (TypeError, ValueError):
+        pass
+
+    lines = str(report_text or "").splitlines()
+    if not lines:
+        return build_previous_day_placeholder_text()
+    lines[0] = f"✨------ **LEAGUE MOOD ({title})** ------✨"
+    return "\n".join(lines)
+
+
 async def resolve_channel(channel_id):
     channel = client.get_channel(channel_id)
     if channel is not None:
@@ -334,11 +357,7 @@ async def get_or_create_report_message(channel, initial_content):
     # Migration path: if only one tracked daily message exists, convert it into
     # the previous-day slot and create a new today message below it.
     if previous_message is None and today_message is not None:
-        placeholder_text = (
-            "✨------ **LEAGUE MOOD (PREVIOUS DAY)** ------✨\n\n"
-            "No previous-day snapshot available yet.\n\n"
-            "✨--------------------------------------------✨"
-        )
+        placeholder_text = build_previous_day_placeholder_text()
         if today_message.content != placeholder_text:
             await today_message.edit(content=placeholder_text)
         remember_previous_report_message(today_message, cycle_key=None)
@@ -349,11 +368,7 @@ async def get_or_create_report_message(channel, initial_content):
             await asyncio.to_thread(db_set_last_report_message, 0, 0)
 
     if previous_message is None:
-        previous_message = await channel.send(
-            "✨------ **LEAGUE MOOD (PREVIOUS DAY)** ------✨\n\n"
-            "No previous-day snapshot available yet.\n\n"
-            "✨--------------------------------------------✨"
-        )
+        previous_message = await channel.send(build_previous_day_placeholder_text())
         remember_previous_report_message(previous_message, cycle_key=previous_cycle_key)
 
     had_existing_today_message = today_message is not None
@@ -367,7 +382,7 @@ async def get_or_create_report_message(channel, initial_content):
             await asyncio.to_thread(db_set_state, DAILY_CYCLE_STATE_KEY, current_cycle_key)
     elif last_cycle_key != current_cycle_key:
         if had_existing_today_message:
-            previous_text = today_message.content
+            previous_text = format_previous_day_report_text(today_message.content, last_cycle_key)
             if previous_message.content != previous_text:
                 await previous_message.edit(content=previous_text)
             remember_previous_report_message(previous_message, cycle_key=last_cycle_key)
