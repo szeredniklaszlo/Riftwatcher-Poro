@@ -12,9 +12,12 @@ from src.constants import (
     MOOD_COMMAND,
     RIOT_TEST_COMMAND,
     SCORE_COMMAND,
+    STREAK_COMMAND,
     TEST_COMMAND,
     WEEK_COMMAND,
 )
+from src.discord_recap_worker import get_ranked_streak_info
+from src.discord_text import format_streak_callout, streak_callout_state_key
 
 
 def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_id, events_channel_id):
@@ -32,6 +35,7 @@ def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_
         f"- `{SCORE_COMMAND}`: Show how each player's Gamer Score is calculated today (run in {events_channel_ref}).\n"
         f"- `{RIOT_TEST_COMMAND}`: Verify Riot API connectivity (run in {events_channel_ref}).\n"
         f"- `{TEST_COMMAND}`: Verify Discord send permissions (run in {events_channel_ref}).\n"
+        f"- `{STREAK_COMMAND} Name#Tag`: Manually post current win/loss streak callout (run in {events_channel_ref}).\n"
         f"- `{HELP_COMMAND}`: Show this help (run in {events_channel_ref})."
     )
 
@@ -53,6 +57,7 @@ def is_supported_command(content_lower):
     return (
         content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
         or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
+        or content_lower.startswith(f"{STREAK_COMMAND.casefold()} ")
     )
 
 
@@ -70,9 +75,11 @@ def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, ev
             HEALTH_COMMAND.casefold(),
             HELP_COMMAND.casefold(),
             SCORE_COMMAND.casefold(),
+            STREAK_COMMAND.casefold(),
         }
         or content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
         or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
+        or content_lower.startswith(f"{STREAK_COMMAND.casefold()} ")
     ):
         return events_channel_id
     return None
@@ -103,6 +110,7 @@ async def handle_incoming_message(
     events_channel_id=None,
     resolve_channel=None,
     worker_stats=None,
+    db_set_state=None,
 ):
     content = message.content.strip()
     content_lower = content.casefold()
@@ -329,6 +337,37 @@ async def handle_incoming_message(
             log(f"[week] Weekly report failed: {exc}")
         finally:
             request_id_context.reset(token)
+        return
+
+    if content_lower == STREAK_COMMAND.casefold():
+        await message.channel.send(f"Usage: `{STREAK_COMMAND} Name#Tag`")
+        return
+
+    if content_lower.startswith(f"{STREAK_COMMAND.casefold()} "):
+        raw_riot_id = content[len(STREAK_COMMAND):].strip()
+        try:
+            riot_id = normalize_riot_id(raw_riot_id)
+        except ValueError as exc:
+            await message.channel.send(f"Streak lookup failed: {exc}")
+            return
+        status_message = await message.channel.send(f"\u23F3 Looking up streak for `{riot_id}`...")
+        try:
+            puuid = await riot_client.fetch_puuid(riot_id)
+            recent_ids = await riot_client.fetch_recent_match_ids(puuid, count=20, riot_id=riot_id)
+            streak_count, is_win_streak = await get_ranked_streak_info(riot_client, puuid, recent_ids)
+            if streak_count < 3 or is_win_streak is None:
+                await status_message.edit(content=f"`{riot_id}` has no active ranked streak (fewer than 3 in a row).")
+            else:
+                callout = format_streak_callout(riot_id, streak_count, is_win_streak)
+                await status_message.delete()
+                await message.channel.send(callout)
+                if db_set_state is not None:
+                    streak_token = f"{'W' if is_win_streak else 'L'}:{streak_count}"
+                    await asyncio.to_thread(db_set_state, streak_callout_state_key(riot_id), streak_token)
+                log(f"[streak] Manual streak callout posted for {riot_id} ({streak_count} {'wins' if is_win_streak else 'losses'}).")
+        except (KeyError, requests.RequestException) as exc:
+            await status_message.edit(content=f"Streak lookup failed for `{riot_id}`: {exc}")
+            log(f"[streak] Streak lookup failed for {riot_id}: {exc}")
         return
 
     if content_lower == ADD_COMMAND.casefold():

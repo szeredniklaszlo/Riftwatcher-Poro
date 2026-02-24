@@ -12,10 +12,14 @@ class FakeStatusMessage:
     def __init__(self, content=""):
         self.content = content
         self.edits = []
+        self.deleted = False
 
     async def edit(self, *, content):
         self.content = content
         self.edits.append(content)
+
+    async def delete(self):
+        self.deleted = True
 
 
 class FakeChannel:
@@ -77,10 +81,24 @@ class FakeMoodService:
 class FakeRiotClient:
     def __init__(self):
         self.fetch_puuid_calls = []
+        self.recent_ids_by_puuid = {}
+        self.match_info_by_id = {}
 
     async def fetch_puuid(self, riot_id):
         self.fetch_puuid_calls.append(riot_id)
         return "puuid-1"
+
+    async def fetch_recent_match_ids(self, puuid, count=20, riot_id=None):
+        return self.recent_ids_by_puuid.get(puuid, [])
+
+    async def fetch_match_info(self, match_id):
+        return self.match_info_by_id.get(match_id, {})
+
+    def get_participant(self, match_info, puuid):
+        for p in match_info.get("info", {}).get("participants", []):
+            if p.get("puuid") == puuid:
+                return p
+        return None
 
 
 def test_handle_mood_command_updates_scoreboard_from_snapshot_then_refresh():
@@ -324,6 +342,105 @@ def test_handle_week_command_loading_text_uses_configured_hour():
     )
 
     assert "Monday 09:00 -> next Monday 09:00" in status_message.edits[0]
+
+
+def _make_match(puuid, win, queue_id=420, duration=1800):
+    return {
+        "info": {
+            "queueId": queue_id,
+            "gameDuration": duration,
+            "gameEndTimestamp": 0,
+            "participants": [{"puuid": puuid, "win": win}],
+        }
+    }
+
+
+def _base_streak_kwargs(channel, friends=None):
+    return dict(
+        channel_id=777,
+        friends=friends or ["Alpha#NA1"],
+        mood_service=FakeMoodService(build_outputs=["unused"]),
+        report_timezone_name="UTC",
+        report_day_start_hour=6,
+        db_enabled=True,
+        start_monotonic=0.0,
+        mood_request_lock=asyncio.Lock(),
+        request_id_context=contextvars.ContextVar("request_id", default=None),
+        create_request_id=lambda _prefix: "streak-1234",
+        get_or_create_report_message=lambda _ch, _ic: None,
+        remember_report_message=lambda _m: None,
+        normalize_riot_id=lambda riot_id: riot_id.strip(),
+        db_upsert_player=lambda _r, _p: None,
+        log=lambda _msg: None,
+        weekly_report_channel_id=888,
+        events_channel_id=channel.id,
+    )
+
+
+def test_streak_command_posts_callout_for_active_win_streak():
+    channel = FakeChannel(channel_id=999)
+    incoming = FakeIncomingMessage("!streak Alpha#NA1", channel)
+    riot_client = FakeRiotClient()
+    riot_client.recent_ids_by_puuid["puuid-1"] = ["M3", "M2", "M1"]
+    riot_client.match_info_by_id = {
+        "M3": _make_match("puuid-1", win=True),
+        "M2": _make_match("puuid-1", win=True),
+        "M1": _make_match("puuid-1", win=True),
+    }
+    state = {}
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            riot_client=riot_client,
+            db_set_state=lambda k, v: state.update({k: v}),
+            **_base_streak_kwargs(channel),
+        )
+    )
+
+    assert any("Momentum" in m.content or "Heater" in m.content or "LEGENDARY" in m.content
+               for m in channel.sent_messages)
+    assert any(v.startswith("W:") for v in state.values())
+
+
+def test_streak_command_reports_no_streak_when_fewer_than_3():
+    channel = FakeChannel(channel_id=999)
+    incoming = FakeIncomingMessage("!streak Alpha#NA1", channel)
+    riot_client = FakeRiotClient()
+    riot_client.recent_ids_by_puuid["puuid-1"] = ["M2", "M1"]
+    riot_client.match_info_by_id = {
+        "M2": _make_match("puuid-1", win=True),
+        "M1": _make_match("puuid-1", win=False),
+    }
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            riot_client=riot_client,
+            db_set_state=None,
+            **_base_streak_kwargs(channel),
+        )
+    )
+
+    assert any("no active ranked streak" in m.content for m in channel.sent_messages)
+
+
+def test_streak_command_bare_shows_usage():
+    channel = FakeChannel(channel_id=999)
+    incoming = FakeIncomingMessage("!streak", channel)
+    riot_client = FakeRiotClient()
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            riot_client=riot_client,
+            db_set_state=None,
+            **_base_streak_kwargs(channel),
+        )
+    )
+
+    assert len(channel.sent_messages) == 1
+    assert "Usage" in channel.sent_messages[0].content
 
 
 def test_health_command_includes_backfill_status():
