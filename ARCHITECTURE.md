@@ -66,6 +66,8 @@ All workers run continuously while connected, each with startup jitter and cycle
   - interval: `max(30, MATCH_RECAP_POLL_SECONDS)`
   - finds new matches using persisted per-player recap key
   - posts recap messages in `MATCH_RECAP_CHANNEL_ID` (queue, local end time, duration, per-player line items)
+  - posts win/loss streak callouts in `MATCH_RECAP_CHANNEL_ID` (3–4: Momentum/Cold Streak, 5–7: Heater Alert/Tilt Watch, 8+: LEGENDARY/FULL TILT); deduped by `last_announced_streak::{riot_id}` token
+  - lookback window: 20 matches
   - refreshes affected players' daily stats and forces scoreboard update
 - Backfill worker
   - interval: `max(120, DAILY_REFRESH_SECONDS * 2)`
@@ -126,8 +128,8 @@ All workers run continuously while connected, each with startup jitter and cycle
 
 - `DAILY_REPORT_CHANNEL_ID`: daily scoreboard + `!Daily` command
 - `WEEKLY_REPORT_CHANNEL_ID`: weekly scoreboard + `!Weekly` command
-- `EVENTS_CHANNEL_ID`: ops/admin commands (`!help`, `!health`, `!test`, `!riottest`, `!Add`, `!DebugPlayer`)
-- `MATCH_RECAP_CHANNEL_ID`: match recap posts
+- `EVENTS_CHANNEL_ID`: ops/admin commands (`!help`, `!health`, `!score`, `!test`, `!riottest`, `!Add`, `!DebugPlayer`)
+- `MATCH_RECAP_CHANNEL_ID`: match recap posts, streak callouts, `!streak` command
 
 All channels are required and no channel fallback chain is used.
 

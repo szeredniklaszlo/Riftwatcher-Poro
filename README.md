@@ -48,6 +48,13 @@ This project does not use Riot's official logos.
   - champion/role
   - W/L, K/D/A, CS/min
   - player/objective damage, damage taken, healing, vision
+- Win/loss streak callouts post in `MATCH_RECAP_CHANNEL_ID` after each recap:
+  - 3–4 wins: ✨ Momentum
+  - 5–7 wins: 🔥 Heater Alert
+  - 8+ wins: 👑 LEGENDARY
+  - 3–4 losses: 💀 Cold Streak
+  - 5–7 losses: 🚨 Tilt Watch
+  - 8+ losses: 🛑 FULL TILT
 - Rank alerts post in `EVENTS_CHANNEL_ID`:
   - rank up: congratulatory message
   - rank down: flame message
@@ -77,6 +84,8 @@ All workers start with jitter to avoid bursty startup traffic and log cycle hear
 
 - `!Daily`
 - `!Weekly`
+- `!score`
+- `!streak Name#Tag`
 - `!Add Name#Tag`
 - `!DebugPlayer Name#Tag`
 - `!health`
@@ -87,6 +96,7 @@ All workers start with jitter to avoid bursty startup traffic and log cycle hear
 Command routing:
 - `!Daily` in `DAILY_REPORT_CHANNEL_ID`
 - `!Weekly` in `WEEKLY_REPORT_CHANNEL_ID`
+- `!streak` in `MATCH_RECAP_CHANNEL_ID`
 - all other commands in `EVENTS_CHANNEL_ID`
 
 ## Environment Variables
