@@ -85,8 +85,8 @@ def format_streak_callout(riot_id, streak_count, is_win_streak):
     if is_win_streak:
         if streak_count >= 8:
             return (
-                f"\U0001F451 **LEGENDARY** `{name}` is on a `{streak_count}`-game ranked win streak.\n"
-                "This is not a drill. Someone call Riot."
+                f"\U0001F451 **LEGENDARY** `{name}` is on a `{streak_count}`-game ranked win streak!\n"
+                "This is not a drill. Someone call Riot!"
             )
         if streak_count >= 5:
             return (
