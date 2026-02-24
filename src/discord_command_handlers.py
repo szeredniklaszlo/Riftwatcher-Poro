@@ -20,7 +20,7 @@ from src.discord_recap_worker import get_ranked_streak_info
 from src.discord_text import format_streak_callout, streak_callout_state_key
 
 
-def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_id, events_channel_id):
+def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_id, events_channel_id, match_recap_channel_id=None):
     daily_channel_ref = f"<#{daily_channel_id}>"
     weekly_channel_ref = f"<#{weekly_channel_id}>" if weekly_channel_id else daily_channel_ref
     events_channel_ref = f"<#{events_channel_id}>"
@@ -35,7 +35,7 @@ def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_
         f"- `{SCORE_COMMAND}`: Show how each player's Gamer Score is calculated today (run in {events_channel_ref}).\n"
         f"- `{RIOT_TEST_COMMAND}`: Verify Riot API connectivity (run in {events_channel_ref}).\n"
         f"- `{TEST_COMMAND}`: Verify Discord send permissions (run in {events_channel_ref}).\n"
-        f"- `{STREAK_COMMAND} Name#Tag`: Manually post current win/loss streak callout (run in {events_channel_ref}).\n"
+        f"- `{STREAK_COMMAND} Name#Tag`: Manually post current win/loss streak callout (run in {f'<#{match_recap_channel_id}>' if match_recap_channel_id else events_channel_ref}).\n"
         f"- `{HELP_COMMAND}`: Show this help (run in {events_channel_ref})."
     )
 
@@ -61,11 +61,16 @@ def is_supported_command(content_lower):
     )
 
 
-def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, events_channel_id):
+def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, events_channel_id, match_recap_channel_id=None):
     if content_lower == MOOD_COMMAND.casefold():
         return daily_channel_id
     if content_lower == WEEK_COMMAND.casefold():
         return weekly_channel_id
+    if (
+        content_lower == STREAK_COMMAND.casefold()
+        or content_lower.startswith(f"{STREAK_COMMAND.casefold()} ")
+    ):
+        return match_recap_channel_id or events_channel_id
     if (
         content_lower in {
             TEST_COMMAND.casefold(),
@@ -75,11 +80,9 @@ def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, ev
             HEALTH_COMMAND.casefold(),
             HELP_COMMAND.casefold(),
             SCORE_COMMAND.casefold(),
-            STREAK_COMMAND.casefold(),
         }
         or content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
         or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
-        or content_lower.startswith(f"{STREAK_COMMAND.casefold()} ")
     ):
         return events_channel_id
     return None
@@ -111,6 +114,7 @@ async def handle_incoming_message(
     resolve_channel=None,
     worker_stats=None,
     db_set_state=None,
+    match_recap_channel_id=None,
 ):
     content = message.content.strip()
     content_lower = content.casefold()
@@ -124,6 +128,7 @@ async def handle_incoming_message(
             daily_channel_id=daily_channel_id,
             weekly_channel_id=weekly_channel_id,
             events_channel_id=events_channel_id,
+            match_recap_channel_id=match_recap_channel_id,
         )
         if expected_channel_id is not None and message.channel.id != expected_channel_id:
             await message.channel.send(
@@ -138,6 +143,7 @@ async def handle_incoming_message(
                 daily_channel_id=daily_channel_id,
                 weekly_channel_id=weekly_channel_id,
                 events_channel_id=events_channel_id,
+                match_recap_channel_id=match_recap_channel_id,
             )
         )
         return
