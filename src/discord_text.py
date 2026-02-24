@@ -83,6 +83,11 @@ def format_recap_player_line(riot_id, participant, match_duration_seconds):
 def format_streak_callout(riot_id, streak_count, is_win_streak):
     name = riot_id.split("#", 1)[0]
     if is_win_streak:
+        if streak_count >= 8:
+            return (
+                f"\U0001F451 **LEGENDARY** `{name}` is on a `{streak_count}`-game ranked win streak.\n"
+                "This is not a drill. Someone call Riot."
+            )
         if streak_count >= 5:
             return (
                 f"\U0001F525 **Heater Alert** `{name}` is on a `{streak_count}`-game ranked win streak.\n"
@@ -91,6 +96,11 @@ def format_streak_callout(riot_id, streak_count, is_win_streak):
         return (
             f"\u2728 **Momentum** `{name}` is now `{streak_count}` wins in a row in ranked.\n"
             "Keep the streak alive."
+        )
+    if streak_count >= 8:
+        return (
+            f"\U0001F6D1 **FULL TILT** `{name}` is on a `{streak_count}`-game ranked loss streak.\n"
+            "Log off. Touch grass. This is a cry for help."
         )
     if streak_count >= 5:
         return (
