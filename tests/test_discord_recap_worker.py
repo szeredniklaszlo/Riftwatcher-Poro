@@ -33,8 +33,8 @@ class FakeChannel:
     def __init__(self):
         self.messages = []
 
-    async def send(self, message):
-        self.messages.append(message)
+    async def send(self, message, tts=False):
+        self.messages.append({"content": message, "tts": bool(tts)})
 
 
 class FakeRiotClient:
@@ -156,9 +156,10 @@ def test_process_recap_cycle_posts_recap_and_syncs_affected_players():
     )
 
     assert len(channel.messages) == 1
-    assert "New Match Recap" in channel.messages[0]
-    assert "`30:00`" in channel.messages[0]
-    assert "\n\n❌ **Bravo**" in channel.messages[0]
+    assert "New Match Recap" in channel.messages[0]["content"]
+    assert "`30:00`" in channel.messages[0]["content"]
+    assert "\n\n❌ **Bravo**" in channel.messages[0]["content"]
+    assert channel.messages[0]["tts"] is False
     assert state[_state_key("Alpha#NA1")] == "EUW1_2"
     assert state[_state_key("Bravo#NA1")] == "EUW1_2"
     assert [row[1] for row in upserts] == ["Alpha#NA1", "Bravo#NA1"]
@@ -232,9 +233,11 @@ def test_process_recap_cycle_posts_streak_callout_when_threshold_crossed():
         )
     )
 
-    assert len(channel.messages) == 1
-    assert "New Match Recap" in channel.messages[0]
-    assert "Heater Alert" in channel.messages[0] or "Momentum" in channel.messages[0]
+    assert len(channel.messages) == 2
+    assert "New Match Recap" in channel.messages[0]["content"]
+    assert channel.messages[0]["tts"] is False
+    assert "Heater Alert" in channel.messages[1]["content"] or "Momentum" in channel.messages[1]["content"]
+    assert channel.messages[1]["tts"] is True
 
 
 def test_process_recap_cycle_no_new_matches_skips_post_and_sync():
@@ -402,8 +405,9 @@ def test_process_recap_cycle_batches_multiple_matches_into_single_post():
     )
 
     assert len(channel.messages) == 1
-    assert channel.messages[0].count("New Match Recap") == 2
-    assert "\n\n---\n\n" in channel.messages[0]
+    assert channel.messages[0]["content"].count("New Match Recap") == 2
+    assert "\n\n---\n\n" in channel.messages[0]["content"]
+    assert channel.messages[0]["tts"] is False
     assert edit_calls == [{"bypass_cache": True}]
 
 

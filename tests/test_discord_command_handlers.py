@@ -27,8 +27,9 @@ class FakeChannel:
         self.id = channel_id
         self.sent_messages = []
 
-    async def send(self, content):
+    async def send(self, content, tts=False):
         message = FakeStatusMessage(content=content)
+        message.tts = bool(tts)
         self.sent_messages.append(message)
         return message
 
@@ -398,8 +399,12 @@ def test_streak_command_posts_callout_for_active_win_streak():
         )
     )
 
-    assert any("Momentum" in m.content or "Heater" in m.content or "LEGENDARY" in m.content
-               for m in channel.sent_messages)
+    streak_messages = [
+        m for m in channel.sent_messages
+        if "Momentum" in m.content or "Heater" in m.content or "LEGENDARY" in m.content
+    ]
+    assert streak_messages
+    assert all(getattr(m, "tts", False) for m in streak_messages)
     assert any(v.startswith("W:") for v in state.values())
 
 

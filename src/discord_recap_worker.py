@@ -203,11 +203,6 @@ async def process_recap_cycle(
         except Exception as exc:
             log(f"[recap] Streak callout skipped for {riot_id}: {exc}")
 
-    if streak_sections:
-        recap_sections.extend(streak_sections)
-
-        recap_messages = _pack_sections_into_messages(recap_sections, recap_section_separator)
-
     for index, recap_message in enumerate(recap_messages):
         await channel.send(recap_message)
         if index < len(recap_messages) - 1:
@@ -216,6 +211,14 @@ async def process_recap_cycle(
         log(
             f"[recap] Posted recap batch in channel {match_recap_channel_id}: "
             f"matches={len(recap_sections)} messages={len(recap_messages)}."
+        )
+
+    for streak_message in streak_sections:
+        await channel.send(streak_message, tts=True)
+    if streak_sections:
+        log(
+            f"[recap] Posted streak callout batch in channel {match_recap_channel_id}: "
+            f"streaks={len(streak_sections)} tts=true."
         )
     for state_key, streak_token, riot_id in pending_streak_state_updates:
         await asyncio.to_thread(db_set_state, state_key, streak_token)

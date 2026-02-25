@@ -366,7 +366,7 @@ async def handle_incoming_message(
             else:
                 callout = format_streak_callout(riot_id, streak_count, is_win_streak)
                 await status_message.delete()
-                await message.channel.send(callout)
+                await message.channel.send(callout, tts=True)
                 if db_set_state is not None:
                     streak_token = f"{'W' if is_win_streak else 'L'}:{streak_count}"
                     await asyncio.to_thread(db_set_state, streak_callout_state_key(riot_id), streak_token)
