@@ -151,6 +151,7 @@ def test_background_daily_refresher_updates_runtime_cleanup_state(monkeypatch):
     assert worker_stats["refresh"]["elapsed_ms_last"] >= 0
     assert worker_stats["refresh"]["elapsed_ms_avg"] >= 0
     assert worker_stats["refresh"]["elapsed_ms_max"] >= worker_stats["refresh"]["elapsed_ms_last"]
+    assert worker_stats["refresh"]["last_success_at"] > 0.0
     assert message.edits
     assert cleanup_calls == [10]
     assert weekly_calls == [True]

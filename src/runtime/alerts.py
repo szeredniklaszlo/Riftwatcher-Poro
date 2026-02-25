@@ -66,3 +66,71 @@ def trigger_riot_key_alert(
         asyncio.run_coroutine_threadsafe(_inner(), loop)
     except Exception as exc:
         log(f"[riot] Could not schedule key-expiry alert: {exc}")
+
+
+def worker_stall_state_key(worker_name):
+    return f"worker_stall_alert_sent::{worker_name}"
+
+
+async def check_and_notify_worker_stalls(
+    *,
+    state,
+    resolve_channel,
+    events_channel_id,
+    worker_stats,
+    stale_thresholds_seconds,
+    db_get_state=None,
+    db_set_state=None,
+    now_monotonic,
+    log,
+):
+    channel = await resolve_channel(events_channel_id)
+    if channel is None:
+        return
+
+    alerted_by_worker = state.setdefault("alerted_by_worker", {})
+
+    for worker_name, threshold_seconds in stale_thresholds_seconds.items():
+        entry = worker_stats.get(worker_name) or {}
+        runs = int(entry.get("runs", 0) or 0)
+        if runs <= 0:
+            continue
+
+        last_success_at = float(entry.get("last_success_at", 0.0) or 0.0)
+        if last_success_at <= 0:
+            continue
+
+        stale_for = now_monotonic - last_success_at
+        is_stale = stale_for >= float(threshold_seconds)
+        alerted = alerted_by_worker.get(worker_name)
+        if alerted is None and db_get_state is not None:
+            persisted = await asyncio.to_thread(db_get_state, worker_stall_state_key(worker_name))
+            alerted = persisted == "1"
+            alerted_by_worker[worker_name] = alerted
+        if alerted is None:
+            alerted = False
+            alerted_by_worker[worker_name] = False
+
+        if is_stale and not alerted:
+            await channel.send(
+                f"\u26A0\uFE0F Worker `{worker_name}` appears stalled. "
+                f"No successful cycle for `{int(stale_for)}s` (threshold `{int(threshold_seconds)}s`)."
+            )
+            alerted_by_worker[worker_name] = True
+            if db_set_state is not None:
+                await asyncio.to_thread(db_set_state, worker_stall_state_key(worker_name), "1")
+            log(
+                f"[health] Worker stall alert sent for {worker_name}: "
+                f"stale_for={int(stale_for)}s threshold={int(threshold_seconds)}s"
+            )
+            continue
+
+        if (not is_stale) and alerted:
+            await channel.send(
+                f"\u2705 Worker `{worker_name}` recovered. "
+                f"Latest successful cycle was `{int(now_monotonic - last_success_at)}s` ago."
+            )
+            alerted_by_worker[worker_name] = False
+            if db_set_state is not None:
+                await asyncio.to_thread(db_set_state, worker_stall_state_key(worker_name), "0")
+            log(f"[health] Worker stall cleared for {worker_name}.")

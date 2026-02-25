@@ -19,10 +19,11 @@ def _ensure_worker_stat_entry(worker_stats, worker_name):
     entry.setdefault("elapsed_ms_avg", 0)
     entry.setdefault("elapsed_ms_max", 0)
     entry.setdefault("elapsed_ms_total", 0)
+    entry.setdefault("last_success_at", 0.0)
     return entry
 
 
-def _record_worker_cycle(worker_stats, worker_name, *, had_error, elapsed_ms):
+def _record_worker_cycle(worker_stats, worker_name, *, had_error, elapsed_ms, ended_at_mono):
     entry = _ensure_worker_stat_entry(worker_stats, worker_name)
     entry["runs"] += 1
     if had_error:
@@ -33,6 +34,8 @@ def _record_worker_cycle(worker_stats, worker_name, *, had_error, elapsed_ms):
     entry["elapsed_ms_total"] += int(elapsed_ms)
     entry["elapsed_ms_max"] = max(int(entry["elapsed_ms_max"]), int(elapsed_ms))
     entry["elapsed_ms_avg"] = int(entry["elapsed_ms_total"] / max(1, entry["runs"]))
+    if not had_error:
+        entry["last_success_at"] = float(ended_at_mono)
 
 
 async def evaluate_rank_changes_and_notify(
@@ -88,8 +91,9 @@ async def background_rank_notifier(
             log(f"[rank] Unexpected background error: {exc}")
         finally:
             request_id_context.reset(token)
-        elapsed = int((time.monotonic() - cycle_start) * 1000)
-        _record_worker_cycle(worker_stats, "rank", had_error=had_error, elapsed_ms=elapsed)
+        cycle_end = time.monotonic()
+        elapsed = int((cycle_end - cycle_start) * 1000)
+        _record_worker_cycle(worker_stats, "rank", had_error=had_error, elapsed_ms=elapsed, ended_at_mono=cycle_end)
         log(f"[rank] Cycle complete elapsed={elapsed}ms next_sleep={sleep_seconds}s")
         await asyncio.sleep(sleep_seconds)
 
@@ -149,8 +153,9 @@ async def background_match_recap_notifier(
             log(f"[recap] Unexpected error: {exc}")
         finally:
             request_id_context.reset(token)
-        elapsed = int((time.monotonic() - cycle_start) * 1000)
-        _record_worker_cycle(worker_stats, "recap", had_error=had_error, elapsed_ms=elapsed)
+        cycle_end = time.monotonic()
+        elapsed = int((cycle_end - cycle_start) * 1000)
+        _record_worker_cycle(worker_stats, "recap", had_error=had_error, elapsed_ms=elapsed, ended_at_mono=cycle_end)
         log(f"[recap] Cycle complete elapsed={elapsed}ms next_sleep={sleep_seconds}s")
         await asyncio.sleep(sleep_seconds)
 
@@ -208,8 +213,9 @@ async def background_match_cache_backfiller(
             log(f"[backfill] Unexpected background error: {exc}")
         finally:
             request_id_context.reset(token)
-        elapsed = int((time.monotonic() - cycle_start) * 1000)
-        _record_worker_cycle(worker_stats, "backfill", had_error=had_error, elapsed_ms=elapsed)
+        cycle_end = time.monotonic()
+        elapsed = int((cycle_end - cycle_start) * 1000)
+        _record_worker_cycle(worker_stats, "backfill", had_error=had_error, elapsed_ms=elapsed, ended_at_mono=cycle_end)
         log(f"[backfill] Cycle complete elapsed={elapsed}ms next_sleep={backfill_interval_seconds}s")
         await asyncio.sleep(backfill_interval_seconds)
 
@@ -310,7 +316,8 @@ async def background_daily_refresher(
             log(f"[refresh] Unexpected error: {exc}")
         finally:
             request_id_context.reset(token)
-        elapsed = int((time.monotonic() - cycle_start) * 1000)
-        _record_worker_cycle(worker_stats, "refresh", had_error=had_error, elapsed_ms=elapsed)
+        cycle_end = time.monotonic()
+        elapsed = int((cycle_end - cycle_start) * 1000)
+        _record_worker_cycle(worker_stats, "refresh", had_error=had_error, elapsed_ms=elapsed, ended_at_mono=cycle_end)
         log(f"[refresh] Cycle complete elapsed={elapsed}ms next_sleep={sleep_seconds}s")
         await asyncio.sleep(sleep_seconds)

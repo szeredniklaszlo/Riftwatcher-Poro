@@ -14,6 +14,7 @@ from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, MOO
 from src.mood_service import MoodService
 from src.riot_api import RiotApiClient
 from src.runtime.alerts import RiotAlertState, trigger_riot_key_alert as runtime_trigger_riot_key_alert
+from src.runtime.alerts import check_and_notify_worker_stalls as runtime_check_and_notify_worker_stalls
 from src.runtime.message_store import (
     create_message_state,
     get_or_create_report_message as runtime_get_or_create_report_message,
@@ -100,10 +101,17 @@ REQUEST_ID_CONTEXT = contextvars.ContextVar("request_id", default=None)
 START_MONOTONIC = time.monotonic()
 RIOT_ALERT_STATE = RiotAlertState()
 WORKER_STATS = {
-    "refresh": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0},
-    "rank": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0},
-    "recap": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0},
-    "backfill": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0},
+    "refresh": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0, "last_success_at": START_MONOTONIC},
+    "rank": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0, "last_success_at": START_MONOTONIC},
+    "recap": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0, "last_success_at": START_MONOTONIC},
+    "backfill": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0, "last_success_at": START_MONOTONIC},
+}
+WORKER_STALL_STATE = {"alerted_by_worker": {}}
+WORKER_STALE_THRESHOLDS = {
+    "refresh": max(90, max(30, DAILY_REFRESH_SECONDS) * 3),
+    "rank": max(90, max(30, DAILY_REFRESH_SECONDS) * 3),
+    "recap": max(90, max(30, MATCH_RECAP_POLL_SECONDS) * 3),
+    "backfill": max(300, max(120, DAILY_REFRESH_SECONDS * 2) * 3),
 }
 def load_tracked_players():
     return db_load_tracked_players()
@@ -126,6 +134,7 @@ BACKGROUND_REFRESH_TASK = None
 BACKGROUND_RECAP_TASK = None
 BACKGROUND_RANK_TASK = None
 BACKGROUND_BACKFILL_TASK = None
+BACKGROUND_STALL_TASK = None
 
 
 def trigger_riot_key_alert():
@@ -409,9 +418,33 @@ async def background_daily_refresher():
     )
 
 
+async def background_worker_stall_notifier():
+    sleep_seconds = 30
+    await asyncio.sleep(15)
+    while not client.is_closed():
+        token = REQUEST_ID_CONTEXT.set(create_request_id("stall"))
+        try:
+            await runtime_check_and_notify_worker_stalls(
+                state=WORKER_STALL_STATE,
+                resolve_channel=resolve_channel,
+                events_channel_id=EVENTS_CHANNEL_ID,
+                worker_stats=WORKER_STATS,
+                stale_thresholds_seconds=WORKER_STALE_THRESHOLDS,
+                db_get_state=db_get_state if DB_ENABLED else None,
+                db_set_state=db_set_state if DB_ENABLED else None,
+                now_monotonic=time.monotonic(),
+                log=log,
+            )
+        except Exception as exc:
+            log(f"[health] Worker stall monitor error: {exc}")
+        finally:
+            REQUEST_ID_CONTEXT.reset(token)
+        await asyncio.sleep(sleep_seconds)
+
+
 @client.event
 async def on_ready():
-    global BACKGROUND_REFRESH_TASK, BACKGROUND_RECAP_TASK, BACKGROUND_RANK_TASK, BACKGROUND_BACKFILL_TASK, STARTUP_SCOREBOARD_INIT_DONE
+    global BACKGROUND_REFRESH_TASK, BACKGROUND_RECAP_TASK, BACKGROUND_RANK_TASK, BACKGROUND_BACKFILL_TASK, BACKGROUND_STALL_TASK, STARTUP_SCOREBOARD_INIT_DONE
     log(f"[startup] Logged in as {client.user} (id={client.user.id})")
     log(f"[startup] Use {TEST_COMMAND} in channel {EVENTS_CHANNEL_ID} to test sending.")
     log(f"[startup] Use {RIOT_TEST_COMMAND} in channel {EVENTS_CHANNEL_ID} to test Riot API access.")
@@ -458,6 +491,8 @@ async def on_ready():
             BACKGROUND_RECAP_TASK = client.loop.create_task(background_match_recap_notifier())
         if BACKGROUND_BACKFILL_TASK is None or BACKGROUND_BACKFILL_TASK.done():
             BACKGROUND_BACKFILL_TASK = client.loop.create_task(background_match_cache_backfiller())
+        if BACKGROUND_STALL_TASK is None or BACKGROUND_STALL_TASK.done():
+            BACKGROUND_STALL_TASK = client.loop.create_task(background_worker_stall_notifier())
     if not STARTUP_SCOREBOARD_INIT_DONE:
         daily_channel = await resolve_channel(DAILY_REPORT_CHANNEL_ID)
         weekly_channel = await resolve_channel(WEEKLY_REPORT_CHANNEL_ID)

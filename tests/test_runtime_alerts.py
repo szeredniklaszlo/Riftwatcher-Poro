@@ -2,6 +2,7 @@ import asyncio
 
 from src.runtime.alerts import (
     RiotAlertState,
+    check_and_notify_worker_stalls,
     mark_riot_401_alert_sent,
     riot_401_alert_already_sent,
     send_riot_key_expired_alert,
@@ -138,3 +139,73 @@ def test_trigger_riot_key_alert_does_not_mark_when_send_fails(monkeypatch):
         assert any("Failed to send" in entry for entry in logs)
 
     asyncio.run(scenario())
+
+
+def test_check_and_notify_worker_stalls_sends_stale_and_recovery_messages():
+    channel = FakeChannel()
+    logs = []
+    state = {"alerted_by_worker": {}}
+    db = {}
+
+    async def resolve_channel(_channel_id):
+        return channel
+
+    worker_stats = {
+        "refresh": {"runs": 3, "last_success_at": 10.0},
+    }
+    thresholds = {"refresh": 30}
+
+    asyncio.run(
+        check_and_notify_worker_stalls(
+            state=state,
+            resolve_channel=resolve_channel,
+            events_channel_id=123,
+            worker_stats=worker_stats,
+            stale_thresholds_seconds=thresholds,
+            db_get_state=lambda key: db.get(key),
+            db_set_state=lambda key, value: db.update({key: value}),
+            now_monotonic=50.0,
+            log=logs.append,
+        )
+    )
+
+    assert len(channel.sent) == 1
+    assert "appears stalled" in channel.sent[0]
+    assert state["alerted_by_worker"]["refresh"] is True
+    assert db["worker_stall_alert_sent::refresh"] == "1"
+
+    # same stale condition should not spam duplicate alerts
+    asyncio.run(
+        check_and_notify_worker_stalls(
+            state=state,
+            resolve_channel=resolve_channel,
+            events_channel_id=123,
+            worker_stats=worker_stats,
+            stale_thresholds_seconds=thresholds,
+            db_get_state=lambda key: db.get(key),
+            db_set_state=lambda key, value: db.update({key: value}),
+            now_monotonic=55.0,
+            log=logs.append,
+        )
+    )
+    assert len(channel.sent) == 1
+
+    # recovery clears alert and sends one recovery message
+    worker_stats["refresh"]["last_success_at"] = 54.0
+    asyncio.run(
+        check_and_notify_worker_stalls(
+            state=state,
+            resolve_channel=resolve_channel,
+            events_channel_id=123,
+            worker_stats=worker_stats,
+            stale_thresholds_seconds=thresholds,
+            db_get_state=lambda key: db.get(key),
+            db_set_state=lambda key, value: db.update({key: value}),
+            now_monotonic=60.0,
+            log=logs.append,
+        )
+    )
+    assert len(channel.sent) == 2
+    assert "recovered" in channel.sent[1]
+    assert state["alerted_by_worker"]["refresh"] is False
+    assert db["worker_stall_alert_sent::refresh"] == "0"
