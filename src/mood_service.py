@@ -7,7 +7,6 @@ import requests
 from src.report_logic import (
     compute_gamer_score,
     derive_primary_role,
-    format_mode_line,
     get_mode_totals,
     get_report_cycle_key,
     rank_sort_key,
@@ -87,12 +86,6 @@ class MoodService:
 
     async def _ensure_role_baselines(self):
         await ensure_role_baselines(self)
-
-    @staticmethod
-    def append_mode_line_if_games(report_lines, label, wins, losses):
-        if wins + losses == 0:
-            return
-        report_lines.append(format_mode_line(label, wins, losses))
 
     @staticmethod
     def simplify_riot_error(exc):
