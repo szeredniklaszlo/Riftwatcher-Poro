@@ -65,7 +65,6 @@ All workers include startup jitter and per-cycle heartbeat logs:
 
 ## Next Improvement Candidates
 
-- Add per-worker success/error counters to health output.
 - Add log sampling/structured metrics export for cycle latency trends.
 
 ## Scoring V2 Draft (Recovered)
