@@ -1,26 +1,34 @@
 import asyncio
 import contextvars
 import json
-import random
 import time
 from datetime import datetime
 
 import discord
-import requests
 
 from src import config as cfg
 from src import db as dbm
-from src.discord_backfill_worker import process_backfill_cycle
 from src.discord_command_handlers import handle_incoming_message
-from src.discord_rank_worker import process_rank_cycle
-from src.discord_recap_worker import process_recap_cycle
-from src.discord_text import (
-    create_request_id,
-    report_signature,
-)
+from src.discord_text import create_request_id
 from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, MOOD_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND, WEEK_COMMAND
 from src.mood_service import MoodService
 from src.riot_api import RiotApiClient
+from src.runtime.alerts import RiotAlertState, trigger_riot_key_alert as runtime_trigger_riot_key_alert
+from src.runtime.message_store import (
+    create_message_state,
+    get_or_create_report_message as runtime_get_or_create_report_message,
+    get_or_create_weekly_report_message as runtime_get_or_create_weekly_report_message,
+    remember_previous_report_message as runtime_remember_previous_report_message,
+    remember_report_message as runtime_remember_report_message,
+    remember_weekly_report_message as runtime_remember_weekly_report_message,
+)
+from src.runtime.workers import (
+    background_daily_refresher as runtime_background_daily_refresher,
+    background_match_cache_backfiller as runtime_background_match_cache_backfiller,
+    background_match_recap_notifier as runtime_background_match_recap_notifier,
+    background_rank_notifier as runtime_background_rank_notifier,
+    evaluate_rank_changes_and_notify as runtime_evaluate_rank_changes_and_notify,
+)
 
 
 def log(message):
@@ -90,21 +98,13 @@ init_db = dbm.init_db
 
 REQUEST_ID_CONTEXT = contextvars.ContextVar("request_id", default=None)
 START_MONOTONIC = time.monotonic()
-LAST_CACHE_CLEANUP_AT = 0.0
-RIOT_401_ALERT_SENT = False
-RIOT_ALERT_LOCK = asyncio.Lock()
+RIOT_ALERT_STATE = RiotAlertState()
 WORKER_STATS = {
     "refresh": {"cycles": 0, "errors": 0},
     "rank": {"cycles": 0, "errors": 0},
     "recap": {"cycles": 0, "errors": 0},
     "backfill": {"cycles": 0, "errors": 0},
 }
-DAILY_CYCLE_STATE_KEY = "daily_report_cycle_key"
-PREVIOUS_REPORT_CHANNEL_STATE_KEY = "previous_report_channel_id"
-PREVIOUS_REPORT_MESSAGE_STATE_KEY = "previous_report_message_id"
-PREVIOUS_REPORT_CYCLE_STATE_KEY = "previous_report_cycle_key"
-
-
 def load_tracked_players():
     return db_load_tracked_players()
 
@@ -117,9 +117,11 @@ intents.message_content = True
 client = discord.Client(intents=intents)
 MOOD_REQUEST_LOCK = asyncio.Lock()
 
-LAST_REPORT_MESSAGE = {"channel_id": None, "message_id": None, "cycle_key": None}
-LAST_PREVIOUS_REPORT_MESSAGE = {"channel_id": None, "message_id": None, "cycle_key": None}
-LAST_WEEKLY_REPORT_MESSAGE = {"channel_id": None, "message_id": None}
+MESSAGE_STATE = create_message_state()
+LAST_REPORT_MESSAGE = MESSAGE_STATE["last_report_message"]
+LAST_PREVIOUS_REPORT_MESSAGE = MESSAGE_STATE["last_previous_report_message"]
+LAST_WEEKLY_REPORT_MESSAGE = MESSAGE_STATE["last_weekly_report_message"]
+REPORT_RUNTIME_STATE = {"last_cache_cleanup_at": 0.0}
 STARTUP_SCOREBOARD_INIT_DONE = False
 BACKGROUND_REFRESH_TASK = None
 BACKGROUND_RECAP_TASK = None
@@ -127,48 +129,16 @@ BACKGROUND_RANK_TASK = None
 BACKGROUND_BACKFILL_TASK = None
 
 
-async def send_riot_key_expired_alert():
-    channel = await resolve_channel(EVENTS_CHANNEL_ID)
-    if channel is None:
-        return
-    await channel.send(
-        "@NoxVain \u26A0\uFE0F Riot API returned 401 Unauthorized. "
-        "Your RIOT_API_KEY is likely expired or invalid. "
-        "Update the Railway variable `RIOT_API_KEY`."
-    )
-    log("[riot] Sent RIOT_API_KEY expiry alert.")
-
-
-def riot_401_alert_already_sent():
-    global RIOT_401_ALERT_SENT
-    if RIOT_401_ALERT_SENT:
-        return True
-    persisted = db_get_state("riot_401_alert_sent")
-    if persisted == "1":
-        RIOT_401_ALERT_SENT = True
-        return True
-    return False
-
-
-def mark_riot_401_alert_sent():
-    global RIOT_401_ALERT_SENT
-    RIOT_401_ALERT_SENT = True
-    db_set_state("riot_401_alert_sent", "1")
-
-
 def trigger_riot_key_alert():
-    async def _inner():
-        async with RIOT_ALERT_LOCK:
-            if riot_401_alert_already_sent():
-                return
-            mark_riot_401_alert_sent()
-        await send_riot_key_expired_alert()
-
-    try:
-        loop = client.loop
-        asyncio.run_coroutine_threadsafe(_inner(), loop)
-    except Exception as exc:
-        log(f"[riot] Could not schedule key-expiry alert: {exc}")
+    runtime_trigger_riot_key_alert(
+        state=RIOT_ALERT_STATE,
+        client=client,
+        resolve_channel=resolve_channel,
+        events_channel_id=EVENTS_CHANNEL_ID,
+        db_get_state=db_get_state,
+        db_set_state=db_set_state,
+        log=log,
+    )
 
 
 riot_client = RiotApiClient(
@@ -212,43 +182,31 @@ mood_service = MoodService(
 
 
 def remember_report_message(message):
-    LAST_REPORT_MESSAGE["channel_id"] = message.channel.id
-    LAST_REPORT_MESSAGE["message_id"] = message.id
-    if DB_ENABLED:
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(asyncio.to_thread(db_set_last_report_message, message.channel.id, message.id))
-        except RuntimeError:
-            db_set_last_report_message(message.channel.id, message.id)
+    runtime_remember_report_message(
+        state=MESSAGE_STATE,
+        message=message,
+        db_enabled=DB_ENABLED,
+        db_set_last_report_message=db_set_last_report_message,
+    )
 
 
 def remember_previous_report_message(message, cycle_key=None):
-    LAST_PREVIOUS_REPORT_MESSAGE["channel_id"] = message.channel.id
-    LAST_PREVIOUS_REPORT_MESSAGE["message_id"] = message.id
-    LAST_PREVIOUS_REPORT_MESSAGE["cycle_key"] = cycle_key
-    if DB_ENABLED:
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(asyncio.to_thread(db_set_state, PREVIOUS_REPORT_CHANNEL_STATE_KEY, str(message.channel.id)))
-            loop.create_task(asyncio.to_thread(db_set_state, PREVIOUS_REPORT_MESSAGE_STATE_KEY, str(message.id)))
-            if cycle_key is not None:
-                loop.create_task(asyncio.to_thread(db_set_state, PREVIOUS_REPORT_CYCLE_STATE_KEY, str(cycle_key)))
-        except RuntimeError:
-            db_set_state(PREVIOUS_REPORT_CHANNEL_STATE_KEY, str(message.channel.id))
-            db_set_state(PREVIOUS_REPORT_MESSAGE_STATE_KEY, str(message.id))
-            if cycle_key is not None:
-                db_set_state(PREVIOUS_REPORT_CYCLE_STATE_KEY, str(cycle_key))
+    runtime_remember_previous_report_message(
+        state=MESSAGE_STATE,
+        message=message,
+        db_enabled=DB_ENABLED,
+        db_set_state=db_set_state,
+        cycle_key=cycle_key,
+    )
 
 
 def remember_weekly_report_message(message):
-    LAST_WEEKLY_REPORT_MESSAGE["channel_id"] = message.channel.id
-    LAST_WEEKLY_REPORT_MESSAGE["message_id"] = message.id
-    if DB_ENABLED:
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(asyncio.to_thread(db_set_last_weekly_report_message, message.channel.id, message.id))
-        except RuntimeError:
-            db_set_last_weekly_report_message(message.channel.id, message.id)
+    runtime_remember_weekly_report_message(
+        state=MESSAGE_STATE,
+        message=message,
+        db_enabled=DB_ENABLED,
+        db_set_last_weekly_report_message=db_set_last_weekly_report_message,
+    )
 
 
 def build_previous_day_placeholder_text():
@@ -289,136 +247,31 @@ async def resolve_channel(channel_id):
 
 
 async def get_or_create_report_message(channel, initial_content):
-    current_cycle_key = mood_service.get_cycle_key()
-    last_cycle_key = LAST_REPORT_MESSAGE.get("cycle_key")
-    previous_channel_id = LAST_PREVIOUS_REPORT_MESSAGE.get("channel_id")
-    previous_message_id = LAST_PREVIOUS_REPORT_MESSAGE.get("message_id")
-    previous_cycle_key = LAST_PREVIOUS_REPORT_MESSAGE.get("cycle_key")
-
-    if DB_ENABLED:
-        if last_cycle_key is None:
-            last_cycle_key = await asyncio.to_thread(db_get_state, DAILY_CYCLE_STATE_KEY)
-            LAST_REPORT_MESSAGE["cycle_key"] = last_cycle_key
-        if not previous_channel_id:
-            raw_previous_channel_id = await asyncio.to_thread(db_get_state, PREVIOUS_REPORT_CHANNEL_STATE_KEY)
-            try:
-                previous_channel_id = int(raw_previous_channel_id) if raw_previous_channel_id else None
-            except ValueError:
-                previous_channel_id = None
-            LAST_PREVIOUS_REPORT_MESSAGE["channel_id"] = previous_channel_id
-        if not previous_message_id:
-            raw_previous_message_id = await asyncio.to_thread(db_get_state, PREVIOUS_REPORT_MESSAGE_STATE_KEY)
-            try:
-                previous_message_id = int(raw_previous_message_id) if raw_previous_message_id else None
-            except ValueError:
-                previous_message_id = None
-            LAST_PREVIOUS_REPORT_MESSAGE["message_id"] = previous_message_id
-        if previous_cycle_key is None:
-            previous_cycle_key = await asyncio.to_thread(db_get_state, PREVIOUS_REPORT_CYCLE_STATE_KEY)
-            LAST_PREVIOUS_REPORT_MESSAGE["cycle_key"] = previous_cycle_key
-
-    channel_id = LAST_REPORT_MESSAGE["channel_id"]
-    message_id = LAST_REPORT_MESSAGE["message_id"]
-
-    if (not channel_id or not message_id) and DB_ENABLED:
-        persisted_channel_id, persisted_message_id = await asyncio.to_thread(db_get_last_report_message)
-        if persisted_channel_id and persisted_message_id:
-            LAST_REPORT_MESSAGE["channel_id"] = persisted_channel_id
-            LAST_REPORT_MESSAGE["message_id"] = persisted_message_id
-            channel_id = persisted_channel_id
-            message_id = persisted_message_id
-
-    previous_message = None
-    if previous_channel_id == channel.id and previous_message_id:
-        try:
-            previous_message = await channel.fetch_message(previous_message_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            LAST_PREVIOUS_REPORT_MESSAGE["channel_id"] = None
-            LAST_PREVIOUS_REPORT_MESSAGE["message_id"] = None
-            LAST_PREVIOUS_REPORT_MESSAGE["cycle_key"] = None
-            previous_channel_id = None
-            previous_message_id = None
-            previous_cycle_key = None
-            if DB_ENABLED:
-                await asyncio.to_thread(db_set_state, PREVIOUS_REPORT_CHANNEL_STATE_KEY, "0")
-                await asyncio.to_thread(db_set_state, PREVIOUS_REPORT_MESSAGE_STATE_KEY, "0")
-                await asyncio.to_thread(db_set_state, PREVIOUS_REPORT_CYCLE_STATE_KEY, "")
-
-    today_message = None
-    if channel_id == channel.id and message_id:
-        try:
-            today_message = await channel.fetch_message(message_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            LAST_REPORT_MESSAGE["channel_id"] = None
-            LAST_REPORT_MESSAGE["message_id"] = None
-            channel_id = None
-            message_id = None
-            if DB_ENABLED:
-                await asyncio.to_thread(db_set_last_report_message, 0, 0)
-
-    # Migration path: if only one tracked daily message exists, convert it into
-    # the previous-day slot and create a new today message below it.
-    if previous_message is None and today_message is not None:
-        placeholder_text = build_previous_day_placeholder_text()
-        if today_message.content != placeholder_text:
-            await today_message.edit(content=placeholder_text)
-        remember_previous_report_message(today_message, cycle_key=None)
-        today_message = None
-        LAST_REPORT_MESSAGE["channel_id"] = None
-        LAST_REPORT_MESSAGE["message_id"] = None
-        if DB_ENABLED:
-            await asyncio.to_thread(db_set_last_report_message, 0, 0)
-
-    if previous_message is None:
-        previous_message = await channel.send(build_previous_day_placeholder_text())
-        remember_previous_report_message(previous_message, cycle_key=previous_cycle_key)
-
-    had_existing_today_message = today_message is not None
-    if today_message is None:
-        today_message = await channel.send(initial_content)
-        remember_report_message(today_message)
-
-    if not last_cycle_key:
-        LAST_REPORT_MESSAGE["cycle_key"] = current_cycle_key
-        if DB_ENABLED:
-            await asyncio.to_thread(db_set_state, DAILY_CYCLE_STATE_KEY, current_cycle_key)
-    elif last_cycle_key != current_cycle_key:
-        if had_existing_today_message:
-            previous_text = format_previous_day_report_text(today_message.content, last_cycle_key)
-            if previous_message.content != previous_text:
-                await previous_message.edit(content=previous_text)
-            remember_previous_report_message(previous_message, cycle_key=last_cycle_key)
-        LAST_REPORT_MESSAGE["cycle_key"] = current_cycle_key
-        if DB_ENABLED:
-            await asyncio.to_thread(db_set_state, DAILY_CYCLE_STATE_KEY, current_cycle_key)
-
-    return today_message
+    return await runtime_get_or_create_report_message(
+        state=MESSAGE_STATE,
+        channel=channel,
+        initial_content=initial_content,
+        mood_service=mood_service,
+        db_enabled=DB_ENABLED,
+        db_get_state=db_get_state,
+        db_set_state=db_set_state,
+        db_get_last_report_message=db_get_last_report_message,
+        db_set_last_report_message=db_set_last_report_message,
+        remember_report_message_fn=remember_report_message,
+        remember_previous_report_message_fn=remember_previous_report_message,
+    )
 
 
 async def get_or_create_weekly_report_message(channel, initial_content):
-    channel_id = LAST_WEEKLY_REPORT_MESSAGE["channel_id"]
-    message_id = LAST_WEEKLY_REPORT_MESSAGE["message_id"]
-
-    if (not channel_id or not message_id) and DB_ENABLED:
-        persisted_channel_id, persisted_message_id = await asyncio.to_thread(db_get_last_weekly_report_message)
-        if persisted_channel_id and persisted_message_id:
-            LAST_WEEKLY_REPORT_MESSAGE["channel_id"] = persisted_channel_id
-            LAST_WEEKLY_REPORT_MESSAGE["message_id"] = persisted_message_id
-            channel_id = persisted_channel_id
-            message_id = persisted_message_id
-
-    if channel_id == channel.id and message_id:
-        try:
-            return await channel.fetch_message(message_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            LAST_WEEKLY_REPORT_MESSAGE["channel_id"] = None
-            LAST_WEEKLY_REPORT_MESSAGE["message_id"] = None
-            if DB_ENABLED:
-                await asyncio.to_thread(db_set_last_weekly_report_message, 0, 0)
-
-    message = await channel.send(initial_content)
-    remember_weekly_report_message(message)
-    return message
+    return await runtime_get_or_create_weekly_report_message(
+        state=MESSAGE_STATE,
+        channel=channel,
+        initial_content=initial_content,
+        db_enabled=DB_ENABLED,
+        db_get_last_weekly_report_message=db_get_last_weekly_report_message,
+        db_set_last_weekly_report_message=db_set_last_weekly_report_message,
+        remember_weekly_report_message_fn=remember_weekly_report_message,
+    )
 
 
 async def edit_last_report_message(prefer_snapshot=False, bypass_cache=False):
@@ -496,12 +349,10 @@ async def weekly_report(channel):
 
 
 async def evaluate_rank_changes_and_notify():
-    channel = await resolve_channel(EVENTS_CHANNEL_ID)
-    if channel is None:
-        return
-    await process_rank_cycle(
+    return await runtime_evaluate_rank_changes_and_notify(
+        resolve_channel=resolve_channel,
+        events_channel_id=EVENTS_CHANNEL_ID,
         friends=FRIENDS,
-        channel=channel,
         riot_client=riot_client,
         db_load_ranked_state=db_load_ranked_state,
         db_upsert_ranked_state=db_upsert_ranked_state,
@@ -511,195 +362,76 @@ async def evaluate_rank_changes_and_notify():
 
 
 async def background_rank_notifier():
-    if not DB_ENABLED:
-        return
-    sleep_seconds = max(30, DAILY_REFRESH_SECONDS)
-    initial_jitter = random.uniform(0.0, min(30.0, sleep_seconds / 2))
-    if initial_jitter > 0:
-        log(f"[rank] Startup jitter sleep={initial_jitter:.1f}s")
-        await asyncio.sleep(initial_jitter)
-    while not client.is_closed():
-        cycle_start = time.monotonic()
-        token = REQUEST_ID_CONTEXT.set(create_request_id("rank"))
-        try:
-            await evaluate_rank_changes_and_notify()
-            WORKER_STATS["rank"]["cycles"] += 1
-        except Exception as exc:
-            WORKER_STATS["rank"]["errors"] += 1
-            log(f"[rank] Unexpected background error: {exc}")
-        finally:
-            REQUEST_ID_CONTEXT.reset(token)
-        elapsed = int((time.monotonic() - cycle_start) * 1000)
-        log(f"[rank] Cycle complete elapsed={elapsed}ms next_sleep={sleep_seconds}s")
-        await asyncio.sleep(sleep_seconds)
+    return await runtime_background_rank_notifier(
+        db_enabled=DB_ENABLED,
+        daily_refresh_seconds=DAILY_REFRESH_SECONDS,
+        client=client,
+        request_id_context=REQUEST_ID_CONTEXT,
+        worker_stats=WORKER_STATS,
+        evaluate_rank_changes_and_notify_fn=evaluate_rank_changes_and_notify,
+        log=log,
+    )
 
 
 async def background_match_recap_notifier():
-    sleep_seconds = max(30, MATCH_RECAP_POLL_SECONDS)
-    initial_jitter = random.uniform(0.0, min(30.0, sleep_seconds / 2))
-    if initial_jitter > 0:
-        log(f"[recap] Startup jitter sleep={initial_jitter:.1f}s")
-        await asyncio.sleep(initial_jitter)
-    while not client.is_closed():
-        cycle_start = time.monotonic()
-        token = REQUEST_ID_CONTEXT.set(create_request_id("recap"))
-        try:
-            channel = await resolve_channel(MATCH_RECAP_CHANNEL_ID)
-            if channel is None:
-                await asyncio.sleep(max(30, MATCH_RECAP_POLL_SECONDS))
-                continue
-
-            await process_recap_cycle(
-                friends=FRIENDS,
-                riot_client=riot_client,
-                mood_service=mood_service,
-                report_timezone=REPORT_TIMEZONE,
-                match_recap_channel_id=MATCH_RECAP_CHANNEL_ID,
-                channel=channel,
-                db_enabled=DB_ENABLED,
-                db_get_state=db_get_state,
-                db_set_state=db_set_state,
-                db_upsert_daily_stats=db_upsert_daily_stats,
-                edit_last_report_message=edit_last_report_message,
-                edit_last_weekly_report_message=edit_last_weekly_report_message,
-                log=log,
-            )
-            WORKER_STATS["recap"]["cycles"] += 1
-        except Exception as exc:
-            WORKER_STATS["recap"]["errors"] += 1
-            log(f"[recap] Unexpected error: {exc}")
-        finally:
-            REQUEST_ID_CONTEXT.reset(token)
-        elapsed = int((time.monotonic() - cycle_start) * 1000)
-        log(f"[recap] Cycle complete elapsed={elapsed}ms next_sleep={sleep_seconds}s")
-        await asyncio.sleep(sleep_seconds)
+    return await runtime_background_match_recap_notifier(
+        client=client,
+        match_recap_poll_seconds=MATCH_RECAP_POLL_SECONDS,
+        request_id_context=REQUEST_ID_CONTEXT,
+        friends=FRIENDS,
+        riot_client=riot_client,
+        mood_service=mood_service,
+        report_timezone=REPORT_TIMEZONE,
+        match_recap_channel_id=MATCH_RECAP_CHANNEL_ID,
+        db_enabled=DB_ENABLED,
+        db_get_state=db_get_state,
+        db_set_state=db_set_state,
+        db_upsert_daily_stats=db_upsert_daily_stats,
+        edit_last_report_message=edit_last_report_message,
+        edit_last_weekly_report_message=edit_last_weekly_report_message,
+        resolve_channel=resolve_channel,
+        worker_stats=WORKER_STATS,
+        log=log,
+    )
 
 
 async def background_match_cache_backfiller():
-    if not DB_ENABLED:
-        return
-
-    backfill_recent_ids_count = 100
-    backfill_per_player_limit = 3
-    backfill_interval_seconds = max(120, DAILY_REFRESH_SECONDS * 2)
-    initial_jitter = random.uniform(0.0, min(60.0, backfill_interval_seconds / 2))
-    if initial_jitter > 0:
-        log(f"[backfill] Startup jitter sleep={initial_jitter:.1f}s")
-        await asyncio.sleep(initial_jitter)
-
-    while not client.is_closed():
-        cycle_start = time.monotonic()
-        token = REQUEST_ID_CONTEXT.set(create_request_id("backfill"))
-        try:
-            total_backfilled = await process_backfill_cycle(
-                friends=FRIENDS,
-                riot_client=riot_client,
-                db_get_state=db_get_state,
-                db_set_state=db_set_state,
-                db_get_match_info=db_get_match_info,
-                recent_ids_count=backfill_recent_ids_count,
-                per_player_limit=backfill_per_player_limit,
-                log=log,
-            )
-            offsets = await asyncio.to_thread(db_load_backfill_offsets)
-            active_offsets = sum(1 for riot_id in FRIENDS if int(offsets.get(riot_id.casefold(), 0) or 0) > 0)
-            max_offset = max((int(offsets.get(riot_id.casefold(), 0) or 0) for riot_id in FRIENDS), default=0)
-            log(
-                f"[backfill] Cycle summary: cached={total_backfilled}, "
-                f"active_offsets={active_offsets}/{len(FRIENDS)}, max_offset={max_offset}."
-            )
-            WORKER_STATS["backfill"]["cycles"] += 1
-        except Exception as exc:
-            WORKER_STATS["backfill"]["errors"] += 1
-            log(f"[backfill] Unexpected background error: {exc}")
-        finally:
-            REQUEST_ID_CONTEXT.reset(token)
-        elapsed = int((time.monotonic() - cycle_start) * 1000)
-        log(f"[backfill] Cycle complete elapsed={elapsed}ms next_sleep={backfill_interval_seconds}s")
-        await asyncio.sleep(backfill_interval_seconds)
+    return await runtime_background_match_cache_backfiller(
+        db_enabled=DB_ENABLED,
+        daily_refresh_seconds=DAILY_REFRESH_SECONDS,
+        client=client,
+        request_id_context=REQUEST_ID_CONTEXT,
+        friends=FRIENDS,
+        riot_client=riot_client,
+        db_get_state=db_get_state,
+        db_set_state=db_set_state,
+        db_get_match_info=db_get_match_info,
+        db_load_backfill_offsets=db_load_backfill_offsets,
+        worker_stats=WORKER_STATS,
+        log=log,
+    )
 
 
 async def background_daily_refresher():
-    global LAST_CACHE_CLEANUP_AT
-    if not DB_ENABLED:
-        return
-    sleep_seconds = max(30, DAILY_REFRESH_SECONDS)
-    initial_jitter = random.uniform(0.0, min(30.0, sleep_seconds / 2))
-    if initial_jitter > 0:
-        log(f"[refresh] Startup jitter sleep={initial_jitter:.1f}s")
-        await asyncio.sleep(initial_jitter)
-    last_snapshot_push_at = 0.0
-    last_snapshot_signature = None
-    snapshot_push_interval = 120.0
-    changed_push_min_interval = 30.0
-    while not client.is_closed():
-        cycle_start = time.monotonic()
-        token = REQUEST_ID_CONTEXT.set(create_request_id("bg"))
-        try:
-            async def push_snapshot_update(force=False):
-                nonlocal last_snapshot_push_at, last_snapshot_signature
-                now_mono = time.monotonic()
-
-                try:
-                    snapshot_text = await mood_service.build_today_win_rate_report(
-                        prefer_snapshot=True,
-                        bypass_cache=True,
-                    )
-                    interval_elapsed = (now_mono - last_snapshot_push_at) >= snapshot_push_interval
-                    signature = report_signature(snapshot_text)
-                    changed = signature != last_snapshot_signature
-                    changed_interval_elapsed = (now_mono - last_snapshot_push_at) >= changed_push_min_interval
-                    should_push = force or interval_elapsed or (changed and changed_interval_elapsed)
-                    if not should_push:
-                        return
-
-                    channel = await resolve_channel(DAILY_REPORT_CHANNEL_ID)
-                    if channel is None:
-                        return
-                    message = await get_or_create_report_message(channel, snapshot_text)
-                    if message.content != snapshot_text:
-                        await message.edit(content=snapshot_text)
-                        log(
-                            f"[refresh] Updated last report message {message.id} in channel {channel.id} "
-                            f"(force={force})."
-                        )
-                    else:
-                        log(f"[refresh] Snapshot unchanged in Discord for message {message.id}.")
-
-                    last_snapshot_signature = signature
-                    last_snapshot_push_at = now_mono
-                except (discord.NotFound, discord.Forbidden) as exc:
-                    log(f"[refresh] Could not edit last report message: {exc}")
-                    LAST_REPORT_MESSAGE["channel_id"] = None
-                    LAST_REPORT_MESSAGE["message_id"] = None
-                    if DB_ENABLED:
-                        await asyncio.to_thread(db_set_last_report_message, 0, 0)
-                except discord.HTTPException as exc:
-                    log(f"[refresh] Discord API error while editing last report message: {exc}")
-
-            async def on_player_refreshed(_processed, _total, _riot_id):
-                await push_snapshot_update(force=False)
-
-            await mood_service.refresh_daily_stats_once(progress_callback=on_player_refreshed)
-            await push_snapshot_update(force=True)
-            await edit_last_weekly_report_message(bypass_cache=True)
-            now_mono = time.monotonic()
-            if (now_mono - LAST_CACHE_CLEANUP_AT) >= max(3600, DAILY_REFRESH_SECONDS):
-                deleted = await asyncio.to_thread(db_cleanup_old_match_cache, MATCH_CACHE_RETENTION_DAYS)
-                LAST_CACHE_CLEANUP_AT = now_mono
-                log(
-                    f"[refresh] Match cache cleanup complete: deleted={deleted}, "
-                    f"retention_days={MATCH_CACHE_RETENTION_DAYS}"
-                )
-            WORKER_STATS["refresh"]["cycles"] += 1
-        except Exception as exc:
-            WORKER_STATS["refresh"]["errors"] += 1
-            log(f"[refresh] Unexpected error: {exc}")
-        finally:
-            REQUEST_ID_CONTEXT.reset(token)
-        elapsed = int((time.monotonic() - cycle_start) * 1000)
-        log(f"[refresh] Cycle complete elapsed={elapsed}ms next_sleep={sleep_seconds}s")
-        await asyncio.sleep(sleep_seconds)
+    LAST_REPORT_MESSAGE["last_cache_cleanup_at"] = REPORT_RUNTIME_STATE["last_cache_cleanup_at"]
+    await runtime_background_daily_refresher(
+        db_enabled=DB_ENABLED,
+        daily_refresh_seconds=DAILY_REFRESH_SECONDS,
+        client=client,
+        request_id_context=REQUEST_ID_CONTEXT,
+        mood_service=mood_service,
+        resolve_channel=resolve_channel,
+        daily_report_channel_id=DAILY_REPORT_CHANNEL_ID,
+        get_or_create_report_message=get_or_create_report_message,
+        edit_last_weekly_report_message=edit_last_weekly_report_message,
+        db_cleanup_old_match_cache=db_cleanup_old_match_cache,
+        match_cache_retention_days=MATCH_CACHE_RETENTION_DAYS,
+        db_set_last_report_message=db_set_last_report_message,
+        report_state=LAST_REPORT_MESSAGE,
+        worker_stats=WORKER_STATS,
+        log=log,
+    )
+    REPORT_RUNTIME_STATE["last_cache_cleanup_at"] = LAST_REPORT_MESSAGE.get("last_cache_cleanup_at", 0.0)
 
 
 @client.event
@@ -807,6 +539,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
 
 
 
