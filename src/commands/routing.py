@@ -4,6 +4,7 @@ from src.constants import (
     HEALTH_COMMAND,
     HELP_COMMAND,
     MOOD_COMMAND,
+    PROFILE_COMMAND,
     RIOT_TEST_COMMAND,
     SCORE_COMMAND,
     STREAK_COMMAND,
@@ -26,6 +27,7 @@ def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_
         f"- `{DEBUG_PLAYER_COMMAND} Name#Tag`: Show queue/window debug details (run in {events_channel_ref}).\n"
         f"- `{HEALTH_COMMAND}`: Show bot/DB/cache health (run in {events_channel_ref}).\n"
         f"- `{SCORE_COMMAND}`: Show how each player's Gamer Score is calculated today (run in {events_channel_ref}).\n"
+        f"- `{PROFILE_COMMAND} Name#Tag`: Show player profile summary (run in {events_channel_ref}).\n"
         f"- `{RIOT_TEST_COMMAND}`: Verify Riot API connectivity (run in {events_channel_ref}).\n"
         f"- `{TEST_COMMAND}`: Verify Discord send permissions (run in {events_channel_ref}).\n"
         f"- `{STREAK_COMMAND} Name#Tag`: Manually post current win/loss streak callout (run in {f'<#{match_recap_channel_id}>' if match_recap_channel_id else events_channel_ref}).\n"
@@ -46,6 +48,7 @@ def is_supported_command(content_lower):
         HEALTH_COMMAND.casefold(),
         HELP_COMMAND.casefold(),
         SCORE_COMMAND.casefold(),
+        PROFILE_COMMAND.casefold(),
         TTS_COMMAND.casefold(),
     }
     if content_lower in known_exact:
@@ -53,6 +56,7 @@ def is_supported_command(content_lower):
     return (
         content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
         or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
+        or content_lower.startswith(f"{PROFILE_COMMAND.casefold()} ")
         or content_lower.startswith(f"{STREAK_COMMAND.casefold()} ")
         or content_lower.startswith(f"{TTS_COMMAND.casefold()} ")
     )
@@ -86,10 +90,12 @@ def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, ev
             HEALTH_COMMAND.casefold(),
             HELP_COMMAND.casefold(),
             SCORE_COMMAND.casefold(),
+            PROFILE_COMMAND.casefold(),
             TTS_COMMAND.casefold(),
         }
         or content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
         or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
+        or content_lower.startswith(f"{PROFILE_COMMAND.casefold()} ")
         or content_lower.startswith(f"{TTS_COMMAND.casefold()} ")
     ):
         return events_channel_id

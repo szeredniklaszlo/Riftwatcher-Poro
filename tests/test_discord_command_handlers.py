@@ -51,6 +51,7 @@ class FakeMoodService:
         self._build_outputs = list(build_outputs)
         self.refresh_recent_calls = []
         self.invalidated = False
+        self._role_baselines = None
 
     async def build_today_win_rate_report(self):
         return self._build_outputs.pop(0)
@@ -77,6 +78,27 @@ class FakeMoodService:
             "top_backfill_offsets": ["Alpha#NA1=400"],
             "worker_stats": worker_stats,
         }
+
+    @staticmethod
+    def get_cycle_key():
+        return "2026-02-25"
+
+    @staticmethod
+    def get_week_window(_now_utc=None):
+        from datetime import date
+
+        return date(2026, 2, 24), date(2026, 3, 3)
+
+    @staticmethod
+    def db_load_latest_stats(_cycle_key):
+        return []
+
+    @staticmethod
+    def db_load_weekly_stats(_start, _end):
+        return []
+
+    async def _ensure_role_baselines(self):
+        return None
 
 
 class FakeRiotClient:
@@ -651,3 +673,109 @@ def test_health_command_includes_worker_latency_metrics_when_available():
     text = channel.sent_messages[0].content
     assert "refresh: 10ok/1err" in text
     assert "1200ms last/980ms avg/3000ms max" in text
+
+
+def test_profile_command_returns_summary_for_player():
+    channel = FakeChannel(channel_id=999)
+    incoming = FakeIncomingMessage("!profile Alpha#NA1", channel)
+    mood_service = FakeMoodService(build_outputs=["unused"])
+    riot_client = FakeRiotClient()
+
+    now_ms = 1_738_500_000_000
+    riot_client.recent_ids_by_puuid["puuid-1"] = ["M3", "M2", "M1"]
+    riot_client.match_info_by_id = {
+        "M3": {
+            "info": {
+                "queueId": 420,
+                "gameDuration": 1800,
+                "gameEndTimestamp": now_ms,
+                "participants": [{"puuid": "puuid-1", "win": True, "kills": 5, "deaths": 2, "assists": 6}],
+            }
+        },
+        "M2": {
+            "info": {
+                "queueId": 420,
+                "gameDuration": 1700,
+                "gameEndTimestamp": now_ms - 200000,
+                "participants": [{"puuid": "puuid-1", "win": True, "kills": 4, "deaths": 3, "assists": 5}],
+            }
+        },
+        "M1": {
+            "info": {
+                "queueId": 420,
+                "gameDuration": 1600,
+                "gameEndTimestamp": now_ms - 400000,
+                "participants": [{"puuid": "puuid-1", "win": True, "kills": 6, "deaths": 4, "assists": 4}],
+            }
+        },
+    }
+
+    mood_service.db_load_latest_stats = lambda _cycle: [
+        {
+            "riot_id": "Alpha#NA1",
+            "solo_wins": 3,
+            "solo_losses": 1,
+            "flex_wins": 0,
+            "flex_losses": 0,
+            "cs_total": 560,
+            "minutes_total": 120.0,
+            "objective_damage": 20000,
+            "player_damage": 60000,
+            "healing": 10000,
+            "damage_taken": 25000,
+            "kills": 30,
+            "deaths": 18,
+            "vision_score": 90,
+            "primary_role": "MIDDLE",
+        }
+    ]
+    mood_service.db_load_weekly_stats = lambda _start, _end: [
+        {
+            "riot_id": "Alpha#NA1",
+            "solo_wins": 8,
+            "solo_losses": 5,
+            "flex_wins": 2,
+            "flex_losses": 1,
+            "cs_total": 1400,
+            "minutes_total": 310.0,
+            "objective_damage": 40000,
+            "player_damage": 140000,
+            "healing": 30000,
+            "damage_taken": 70000,
+            "kills": 70,
+            "deaths": 40,
+            "vision_score": 200,
+        }
+    ]
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            channel_id=777,
+            friends=["Alpha#NA1"],
+            riot_client=riot_client,
+            mood_service=mood_service,
+            report_timezone_name="UTC",
+            report_day_start_hour=6,
+            db_enabled=True,
+            start_monotonic=0.0,
+            mood_request_lock=asyncio.Lock(),
+            request_id_context=contextvars.ContextVar("request_id", default=None),
+            create_request_id=lambda _prefix: "profile-1234",
+            get_or_create_report_message=lambda _channel, _initial_content: None,
+            remember_report_message=lambda _message: None,
+            normalize_riot_id=lambda riot_id: riot_id.strip(),
+            db_upsert_player=lambda _riot_id, _puuid: None,
+            log=lambda _msg: None,
+            weekly_report_channel_id=888,
+            events_channel_id=999,
+        )
+    )
+
+    assert len(channel.sent_messages) == 1
+    text = channel.sent_messages[0].content
+    assert "Profile: Alpha#NA1" in text
+    assert "Today: `3W-1L`" in text
+    assert "Week: `10W-6L`" in text
+    assert "Streak: `W3`" in text
+    assert "Recent ranked KDA" in text
