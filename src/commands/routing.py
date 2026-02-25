@@ -40,6 +40,7 @@ def is_supported_command(content_lower):
         RIOT_TEST_COMMAND.casefold(),
         MOOD_COMMAND.casefold(),
         WEEK_COMMAND.casefold(),
+        STREAK_COMMAND.casefold(),
         ADD_COMMAND.casefold(),
         DEBUG_PLAYER_COMMAND.casefold(),
         HEALTH_COMMAND.casefold(),

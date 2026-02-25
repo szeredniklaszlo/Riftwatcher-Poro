@@ -477,6 +477,27 @@ def test_streak_command_bare_shows_usage():
     assert "Usage" in channel.sent_messages[0].content
 
 
+def test_streak_command_wrong_channel_prompts_recap_channel():
+    channel = FakeChannel(channel_id=777)
+    incoming = FakeIncomingMessage("!streak", channel)
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            riot_client=FakeRiotClient(),
+            db_set_state=None,
+            **{
+                **_base_streak_kwargs(channel),
+                "events_channel_id": 999,
+                "match_recap_channel_id": 555,
+            },
+        )
+    )
+
+    assert len(channel.sent_messages) == 1
+    assert "Use `!streak` in <#555>." == channel.sent_messages[0].content
+
+
 def test_tts_command_updates_and_reports_state():
     channel = FakeChannel(channel_id=999)
     state = {}
