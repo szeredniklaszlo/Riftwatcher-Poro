@@ -240,6 +240,79 @@ def test_process_recap_cycle_posts_streak_callout_when_threshold_crossed():
     assert channel.messages[1]["tts"] is True
 
 
+def test_process_recap_cycle_posts_streak_callout_without_tts_when_disabled():
+    channel = FakeChannel()
+    riot = FakeRiotClient()
+    mood = FakeMoodService()
+    now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+
+    riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a"}
+    riot.recent_ids_by_puuid = {"puuid-a": ["EUW1_3", "EUW1_2", "EUW1_1"]}
+    riot.match_info_by_id = {
+        "EUW1_3": {
+            "info": {
+                "queueId": 420,
+                "gameDuration": 1800,
+                "gameEndTimestamp": now_ms,
+                "participants": [_participant("puuid-a", win=True)],
+            }
+        },
+        "EUW1_2": {
+            "info": {
+                "queueId": 420,
+                "gameDuration": 1800,
+                "gameEndTimestamp": now_ms - 1800,
+                "participants": [_participant("puuid-a", win=True)],
+            }
+        },
+        "EUW1_1": {
+            "info": {
+                "queueId": 420,
+                "gameDuration": 1800,
+                "gameEndTimestamp": now_ms - 3600,
+                "participants": [_participant("puuid-a", win=True)],
+            }
+        },
+    }
+    riot.mode_records_by_riot_id = {
+        "Alpha#NA1": (
+            {"solo_duo": {"wins": 3, "losses": 0}, "flex": {"wins": 0, "losses": 0}},
+            {"cs_total": 100, "minutes_total": 30.0},
+        ),
+    }
+
+    state = {
+        _state_key("Alpha#NA1"): "EUW1_2",
+        "streak_tts_enabled": "0",
+    }
+
+    def db_get_state(key):
+        return state.get(key)
+
+    def db_set_state(key, value):
+        state[key] = value
+
+    asyncio.run(
+        process_recap_cycle(
+            friends=["Alpha#NA1"],
+            riot_client=riot,
+            mood_service=mood,
+            report_timezone=timezone.utc,
+            match_recap_channel_id=123,
+            channel=channel,
+            db_enabled=True,
+            db_get_state=db_get_state,
+            db_set_state=db_set_state,
+            db_upsert_daily_stats=lambda *_args, **_kwargs: None,
+            edit_last_report_message=lambda **_kwargs: asyncio.sleep(0),
+            log=lambda _msg: None,
+        )
+    )
+
+    assert len(channel.messages) == 2
+    assert channel.messages[1]["tts"] is False
+
+
 def test_process_recap_cycle_no_new_matches_skips_post_and_sync():
     channel = FakeChannel()
     riot = FakeRiotClient()

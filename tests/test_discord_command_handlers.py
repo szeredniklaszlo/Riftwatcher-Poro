@@ -408,6 +408,35 @@ def test_streak_command_posts_callout_for_active_win_streak():
     assert any(v.startswith("W:") for v in state.values())
 
 
+def test_streak_command_uses_tts_setting_when_disabled():
+    channel = FakeChannel(channel_id=999)
+    incoming = FakeIncomingMessage("!streak Alpha#NA1", channel)
+    riot_client = FakeRiotClient()
+    riot_client.recent_ids_by_puuid["puuid-1"] = ["M3", "M2", "M1"]
+    riot_client.match_info_by_id = {
+        "M3": _make_match("puuid-1", win=True),
+        "M2": _make_match("puuid-1", win=True),
+        "M1": _make_match("puuid-1", win=True),
+    }
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            riot_client=riot_client,
+            db_get_state=lambda _k: "0",
+            db_set_state=None,
+            **_base_streak_kwargs(channel),
+        )
+    )
+
+    streak_messages = [
+        m for m in channel.sent_messages
+        if "Momentum" in m.content or "Heater" in m.content or "LEGENDARY" in m.content
+    ]
+    assert streak_messages
+    assert all(getattr(m, "tts", True) is False for m in streak_messages)
+
+
 def test_streak_command_reports_no_streak_when_fewer_than_3():
     channel = FakeChannel(channel_id=999)
     incoming = FakeIncomingMessage("!streak Alpha#NA1", channel)
@@ -447,6 +476,76 @@ def test_streak_command_bare_shows_usage():
     assert len(channel.sent_messages) == 1
     assert "Usage" in channel.sent_messages[0].content
 
+
+def test_tts_command_updates_and_reports_state():
+    channel = FakeChannel(channel_id=999)
+    state = {}
+
+    asyncio.run(
+        handle_incoming_message(
+            message=FakeIncomingMessage("!tts off", channel),
+            riot_client=FakeRiotClient(),
+            db_get_state=lambda key: state.get(key),
+            db_set_state=lambda key, value: state.update({key: value}),
+            **_base_streak_kwargs(channel),
+        )
+    )
+    assert any("now `OFF`" in m.content for m in channel.sent_messages)
+
+    asyncio.run(
+        handle_incoming_message(
+            message=FakeIncomingMessage("!tts status", channel),
+            riot_client=FakeRiotClient(),
+            db_get_state=lambda key: state.get(key),
+            db_set_state=lambda key, value: state.update({key: value}),
+            **_base_streak_kwargs(channel),
+        )
+    )
+    assert any("currently `OFF`" in m.content for m in channel.sent_messages)
+
+
+def test_tts_command_allowed_in_match_recap_channel():
+    channel = FakeChannel(channel_id=555)
+    state = {}
+
+    asyncio.run(
+        handle_incoming_message(
+            message=FakeIncomingMessage("!tts on", channel),
+            riot_client=FakeRiotClient(),
+            db_get_state=lambda key: state.get(key),
+            db_set_state=lambda key, value: state.update({key: value}),
+            **{
+                **_base_streak_kwargs(channel),
+                "events_channel_id": 999,
+                "match_recap_channel_id": 555,
+            },
+        )
+    )
+
+    assert any("now `ON`" in m.content for m in channel.sent_messages)
+
+
+def test_tts_command_wrong_channel_prompts_events_or_recap():
+    channel = FakeChannel(channel_id=777)
+    state = {}
+
+    asyncio.run(
+        handle_incoming_message(
+            message=FakeIncomingMessage("!tts status", channel),
+            riot_client=FakeRiotClient(),
+            db_get_state=lambda key: state.get(key),
+            db_set_state=lambda key, value: state.update({key: value}),
+            **{
+                **_base_streak_kwargs(channel),
+                "events_channel_id": 999,
+                "match_recap_channel_id": 555,
+            },
+        )
+    )
+
+    assert len(channel.sent_messages) == 1
+    assert "<#999>" in channel.sent_messages[0].content
+    assert "<#555>" in channel.sent_messages[0].content
 
 def test_health_command_includes_backfill_status():
     channel = FakeChannel(channel_id=999)

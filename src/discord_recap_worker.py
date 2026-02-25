@@ -8,8 +8,10 @@ from src.discord_text import (
     format_recap_player_line,
     format_recap_queue_name,
     format_streak_callout,
+    parse_streak_tts_enabled,
     match_recap_state_key,
     streak_callout_state_key,
+    streak_tts_enabled_state_key,
 )
 from src.report_logic import derive_primary_role, get_match_duration_seconds, get_match_end_unix_seconds, get_mode_bucket, is_remake_match
 
@@ -213,12 +215,19 @@ async def process_recap_cycle(
             f"matches={len(recap_sections)} messages={len(recap_messages)}."
         )
 
+    streak_tts_enabled = True
+    try:
+        raw_tts_state = await asyncio.to_thread(db_get_state, streak_tts_enabled_state_key())
+        streak_tts_enabled = parse_streak_tts_enabled(raw_tts_state, default=True)
+    except Exception as exc:
+        log(f"[recap] Could not read streak TTS setting: {exc}")
+
     for streak_message in streak_sections:
-        await channel.send(streak_message, tts=True)
+        await channel.send(streak_message, tts=streak_tts_enabled)
     if streak_sections:
         log(
             f"[recap] Posted streak callout batch in channel {match_recap_channel_id}: "
-            f"streaks={len(streak_sections)} tts=true."
+            f"streaks={len(streak_sections)} tts={str(streak_tts_enabled).lower()}."
         )
     for state_key, streak_token, riot_id in pending_streak_state_updates:
         await asyncio.to_thread(db_set_state, state_key, streak_token)

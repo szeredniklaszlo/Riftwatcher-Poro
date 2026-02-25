@@ -795,6 +795,7 @@ async def on_message(message):
         events_channel_id=EVENTS_CHANNEL_ID,
         resolve_channel=resolve_channel,
         worker_stats=WORKER_STATS,
+        db_get_state=db_get_state,
         db_set_state=db_set_state,
         match_recap_channel_id=MATCH_RECAP_CHANNEL_ID,
     )

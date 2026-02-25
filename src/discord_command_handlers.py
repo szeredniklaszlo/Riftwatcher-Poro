@@ -14,10 +14,16 @@ from src.constants import (
     SCORE_COMMAND,
     STREAK_COMMAND,
     TEST_COMMAND,
+    TTS_COMMAND,
     WEEK_COMMAND,
 )
 from src.discord_recap_worker import get_ranked_streak_info
-from src.discord_text import format_streak_callout, streak_callout_state_key
+from src.discord_text import (
+    format_streak_callout,
+    parse_streak_tts_enabled,
+    streak_callout_state_key,
+    streak_tts_enabled_state_key,
+)
 
 
 def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_id, events_channel_id, match_recap_channel_id=None):
@@ -36,6 +42,7 @@ def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_
         f"- `{RIOT_TEST_COMMAND}`: Verify Riot API connectivity (run in {events_channel_ref}).\n"
         f"- `{TEST_COMMAND}`: Verify Discord send permissions (run in {events_channel_ref}).\n"
         f"- `{STREAK_COMMAND} Name#Tag`: Manually post current win/loss streak callout (run in {f'<#{match_recap_channel_id}>' if match_recap_channel_id else events_channel_ref}).\n"
+        f"- `{TTS_COMMAND} on|off|status`: Toggle streak alert TTS (run in {events_channel_ref} or {f'<#{match_recap_channel_id}>' if match_recap_channel_id else events_channel_ref}).\n"
         f"- `{HELP_COMMAND}`: Show this help (run in {events_channel_ref})."
     )
 
@@ -51,6 +58,7 @@ def is_supported_command(content_lower):
         HEALTH_COMMAND.casefold(),
         HELP_COMMAND.casefold(),
         SCORE_COMMAND.casefold(),
+        TTS_COMMAND.casefold(),
     }
     if content_lower in known_exact:
         return True
@@ -58,6 +66,7 @@ def is_supported_command(content_lower):
         content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
         or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
         or content_lower.startswith(f"{STREAK_COMMAND.casefold()} ")
+        or content_lower.startswith(f"{TTS_COMMAND.casefold()} ")
     )
 
 
@@ -72,6 +81,15 @@ def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, ev
     ):
         return match_recap_channel_id or events_channel_id
     if (
+        content_lower == TTS_COMMAND.casefold()
+        or content_lower.startswith(f"{TTS_COMMAND.casefold()} ")
+    ):
+        allowed = [events_channel_id]
+        if match_recap_channel_id and match_recap_channel_id != events_channel_id:
+            allowed.append(match_recap_channel_id)
+        return tuple(allowed)
+
+    if (
         content_lower in {
             TEST_COMMAND.casefold(),
             RIOT_TEST_COMMAND.casefold(),
@@ -80,9 +98,11 @@ def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, ev
             HEALTH_COMMAND.casefold(),
             HELP_COMMAND.casefold(),
             SCORE_COMMAND.casefold(),
+            TTS_COMMAND.casefold(),
         }
         or content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
         or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
+        or content_lower.startswith(f"{TTS_COMMAND.casefold()} ")
     ):
         return events_channel_id
     return None
@@ -113,6 +133,7 @@ async def handle_incoming_message(
     events_channel_id=None,
     resolve_channel=None,
     worker_stats=None,
+    db_get_state=None,
     db_set_state=None,
     match_recap_channel_id=None,
 ):
@@ -130,11 +151,19 @@ async def handle_incoming_message(
             events_channel_id=events_channel_id,
             match_recap_channel_id=match_recap_channel_id,
         )
-        if expected_channel_id is not None and message.channel.id != expected_channel_id:
-            await message.channel.send(
-                f"Use `{content.split(' ', 1)[0]}` in <#{expected_channel_id}>."
-            )
-            return
+        if expected_channel_id is not None:
+            if isinstance(expected_channel_id, tuple):
+                if message.channel.id not in expected_channel_id:
+                    channel_refs = " or ".join(f"<#{cid}>" for cid in expected_channel_id)
+                    await message.channel.send(
+                        f"Use `{content.split(' ', 1)[0]}` in {channel_refs}."
+                    )
+                    return
+            elif message.channel.id != expected_channel_id:
+                await message.channel.send(
+                    f"Use `{content.split(' ', 1)[0]}` in <#{expected_channel_id}>."
+                )
+                return
 
     if content_lower == HELP_COMMAND.casefold():
         await message.channel.send(
@@ -210,6 +239,35 @@ async def handle_incoming_message(
         report = await mood_service.build_score_breakdown_report()
         await message.channel.send(report)
         log("[score] Sent score breakdown.")
+        return
+
+    if content_lower == TTS_COMMAND.casefold():
+        await message.channel.send(f"Usage: `{TTS_COMMAND} on|off|status`")
+        return
+
+    if content_lower.startswith(f"{TTS_COMMAND.casefold()} "):
+        arg = content[len(TTS_COMMAND):].strip().lower()
+        state_key = streak_tts_enabled_state_key()
+        if arg == "status":
+            raw_value = None
+            if db_get_state is not None:
+                raw_value = await asyncio.to_thread(db_get_state, state_key)
+            enabled = parse_streak_tts_enabled(raw_value, default=True)
+            await message.channel.send(
+                f"Streak alert TTS is currently `{'ON' if enabled else 'OFF'}`."
+            )
+            return
+        if arg not in {"on", "off"}:
+            await message.channel.send(f"Usage: `{TTS_COMMAND} on|off|status`")
+            return
+
+        enabled = arg == "on"
+        if db_set_state is not None:
+            await asyncio.to_thread(db_set_state, state_key, "1" if enabled else "0")
+        await message.channel.send(
+            f"Streak alert TTS is now `{'ON' if enabled else 'OFF'}`."
+        )
+        log(f"[tts] Streak alert TTS set to {'ON' if enabled else 'OFF'}.")
         return
 
     if content_lower == DEBUG_PLAYER_COMMAND.casefold():
@@ -366,7 +424,11 @@ async def handle_incoming_message(
             else:
                 callout = format_streak_callout(riot_id, streak_count, is_win_streak)
                 await status_message.delete()
-                await message.channel.send(callout, tts=True)
+                tts_enabled = True
+                if db_get_state is not None:
+                    raw_tts = await asyncio.to_thread(db_get_state, streak_tts_enabled_state_key())
+                    tts_enabled = parse_streak_tts_enabled(raw_tts, default=True)
+                await message.channel.send(callout, tts=tts_enabled)
                 if db_set_state is not None:
                     streak_token = f"{'W' if is_win_streak else 'L'}:{streak_count}"
                     await asyncio.to_thread(db_set_state, streak_callout_state_key(riot_id), streak_token)

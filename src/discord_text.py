@@ -18,6 +18,21 @@ def streak_callout_state_key(riot_id):
     return f"last_announced_streak::{riot_id.casefold()}"
 
 
+def streak_tts_enabled_state_key():
+    return "streak_tts_enabled"
+
+
+def parse_streak_tts_enabled(raw_value, default=True):
+    if raw_value is None:
+        return bool(default)
+    value = str(raw_value).strip().lower()
+    if value in {"0", "false", "off", "disabled", "no"}:
+        return False
+    if value in {"1", "true", "on", "enabled", "yes"}:
+        return True
+    return bool(default)
+
+
 def format_recap_queue_name(queue_id):
     if queue_id == 420:
         return "\U0001F3C6 Ranked Solo/Duo"
