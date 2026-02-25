@@ -48,13 +48,14 @@ This project does not use Riot's official logos.
   - champion/role
   - W/L, K/D/A, CS/min
   - player/objective damage, damage taken, healing, vision
-- Win/loss streak callouts post in `MATCH_RECAP_CHANNEL_ID` after each recap:
+- Win/loss streak callouts post in `MATCH_RECAP_CHANNEL_ID` as separate messages:
   - 3–4 wins: ✨ Momentum
   - 5–7 wins: 🔥 Heater Alert
   - 8+ wins: 👑 LEGENDARY
   - 3–4 losses: 💀 Cold Streak
   - 5–7 losses: 🚨 Tilt Watch
   - 8+ losses: 🛑 FULL TILT
+  - TTS is enabled by default and can be toggled with `!tts on|off|status`
 - Rank alerts post in `EVENTS_CHANNEL_ID`:
   - rank up: congratulatory message
   - rank down: flame message
@@ -74,6 +75,7 @@ All workers start with jitter to avoid bursty startup traffic and log cycle hear
   - compares current ranked entries vs persisted `player_ranked_state`
 - Recap worker (`MATCH_RECAP_POLL_SECONDS`, default `90`)
   - detects newly finished matches and posts recaps
+  - posts streak callouts as separate messages (not merged into recap batches)
   - refreshes affected players' daily stats and forces scoreboard sync
 - Backfill worker (`max(120, DAILY_REFRESH_SECONDS * 2)`)
   - only when no new matches are detected
@@ -86,6 +88,7 @@ All workers start with jitter to avoid bursty startup traffic and log cycle hear
 - `!Weekly`
 - `!score`
 - `!streak Name#Tag`
+- `!tts on|off|status`
 - `!Add Name#Tag`
 - `!DebugPlayer Name#Tag`
 - `!health`
@@ -97,6 +100,7 @@ Command routing:
 - `!Daily` in `DAILY_REPORT_CHANNEL_ID`
 - `!Weekly` in `WEEKLY_REPORT_CHANNEL_ID`
 - `!streak` in `MATCH_RECAP_CHANNEL_ID`
+- `!tts` in `EVENTS_CHANNEL_ID` or `MATCH_RECAP_CHANNEL_ID`
 - all other commands in `EVENTS_CHANNEL_ID`
 
 ## Environment Variables
