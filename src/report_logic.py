@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 VALID_POSITIONS = frozenset({"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"})
 GAMER_SCORE_WIN_WEIGHT = 0.65
 GAMER_SCORE_PERF_WEIGHT = 0.35
+GAMER_SCORE_PERF_RAMP_GAMES = 8
+WILSON_Z = 1.40
 
 _BASELINE_STATS = (
     "cs_per_min",
@@ -18,6 +20,16 @@ _BASELINE_STATS = (
     "vision_per_min",
 )
 _INVERTED_BASELINE_STATS = frozenset({"deaths_per_min"})
+_PERF_STAT_WEIGHTS = {
+    "cs_per_min": 0.16,
+    "player_damage_per_min": 0.20,
+    "objective_damage_per_min": 0.16,
+    "healing_per_min": 0.06,
+    "damage_taken_per_min": 0.10,
+    "kills_per_min": 0.14,
+    "deaths_per_min": 0.12,
+    "vision_per_min": 0.06,
+}
 
 
 def get_mode_bucket(queue_id):
@@ -137,24 +149,43 @@ def compute_perf_percentile(player_perf_per_min, role, baselines):
     if not baselines or role not in baselines:
         return 0.5
     role_baselines = baselines[role]
+    weighted_sum = 0.0
+    weight_total = 0.0
     stat_percentiles = []
     for stat_name, values in role_baselines.items():
         player_value = float(player_perf_per_min.get(stat_name, 0.0) or 0.0)
         percentile = bisect.bisect_right(values, player_value) / len(values)
         if stat_name in _INVERTED_BASELINE_STATS:
             percentile = 1.0 - percentile
+        weight = float(_PERF_STAT_WEIGHTS.get(stat_name, 0.0) or 0.0)
+        weighted_sum += percentile * weight
+        weight_total += weight
         stat_percentiles.append(percentile)
+    if weight_total > 0:
+        return weighted_sum / weight_total
     if not stat_percentiles:
         return 0.5
     return sum(stat_percentiles) / len(stat_percentiles)
 
 
-def compute_gamer_score(wins, losses, performance_totals, primary_role, baselines):
-    """Composite Gamer Score (0–100): 65% Wilson win-rate + 35% role-adjusted performance percentile.
+def gamer_score_weights_for_games(total_games):
+    if total_games <= 0:
+        return 1.0, 0.0
+    perf_factor = min(1.0, float(total_games) / float(GAMER_SCORE_PERF_RAMP_GAMES))
+    perf_weight = GAMER_SCORE_PERF_WEIGHT * perf_factor
+    win_weight = 1.0 - perf_weight
+    return win_weight, perf_weight
 
+
+def compute_gamer_score(wins, losses, performance_totals, primary_role, baselines):
+    """Composite Gamer Score (0-100): Wilson confidence + role-adjusted performance percentile.
+
+    Performance weight ramps in over the first N ranked games, then caps at GAMER_SCORE_PERF_WEIGHT.
     Falls back to pure Wilson * 100 when baselines or role are unavailable.
     """
     wilson = wilson_lower_bound(wins, losses)
+    total_games = wins + losses
+    win_weight, perf_weight = gamer_score_weights_for_games(total_games)
     if baselines and primary_role and (wins + losses) > 0:
         minutes = float(performance_totals.get("minutes_total", 0.0) or 0.0)
         if minutes > 0:
@@ -177,11 +208,11 @@ def compute_gamer_score(wins, losses, performance_totals, primary_role, baseline
                 "vision_per_min": vision_score / minutes,
             }
             perf = compute_perf_percentile(perf_per_min, primary_role, baselines)
-            return (wilson * GAMER_SCORE_WIN_WEIGHT + perf * GAMER_SCORE_PERF_WEIGHT) * 100
+            return (wilson * win_weight + perf * perf_weight) * 100
     return wilson * 100
 
 
-def wilson_lower_bound(wins, losses, z=1.28):
+def wilson_lower_bound(wins, losses, z=WILSON_Z):
     n = wins + losses
     if n <= 0:
         return 0.0
@@ -261,5 +292,4 @@ def is_match_in_report_cycle(match_info, report_timezone, day_start_hour=6, now_
     window_start = get_report_cycle_start_unix_seconds(report_timezone, day_start_hour=day_start_hour, now_utc=now_utc)
     end_ts = get_match_end_unix_seconds(match_info)
     return end_ts >= window_start
-
 

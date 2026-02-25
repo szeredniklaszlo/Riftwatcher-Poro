@@ -4,10 +4,11 @@ from datetime import datetime
 
 from src.report_logic import (
     GAMER_SCORE_PERF_WEIGHT,
-    GAMER_SCORE_WIN_WEIGHT,
+    GAMER_SCORE_PERF_RAMP_GAMES,
     compute_gamer_score,
     compute_perf_percentile,
     format_mode_line,
+    gamer_score_weights_for_games,
     get_mode_totals,
     rank_sort_key,
     wilson_lower_bound,
@@ -220,9 +221,12 @@ async def build_score_breakdown_report(service):
     lines = [
         "\U0001F3AE **GAMER SCORE** \u2014 how it\u2019s calculated",
         "",
-        "**Score = win-rate confidence \u00d7 65% + role performance \u00d7 35%**",
+        (
+            f"**Score = win confidence + ramped role performance "
+            f"(perf ramps to max {int(GAMER_SCORE_PERF_WEIGHT * 100)}% by {GAMER_SCORE_PERF_RAMP_GAMES} games)**"
+        ),
         "Win confidence: Wilson lower bound \u2014 low game counts are penalised.",
-        "Performance: your per-min stats vs same-role players drawn from stored match history.",
+        "Performance: weighted per-min stats vs same-role players drawn from stored match history.",
         "",
     ]
 
@@ -267,7 +271,8 @@ async def build_score_breakdown_report(service):
         primary_role = str(row.get("primary_role") or "").upper() or None
         win_rate = (wins / (wins + losses)) * 100
         wilson = wilson_lower_bound(wins, losses)
-        win_pts = wilson * GAMER_SCORE_WIN_WEIGHT * 100
+        win_weight, perf_weight = gamer_score_weights_for_games(wins + losses)
+        win_pts = wilson * win_weight * 100
         gamer_score = compute_gamer_score(wins, losses, performance_totals, primary_role, service._role_baselines)
 
         role_label = primary_role or "?"
@@ -284,7 +289,7 @@ async def build_score_breakdown_report(service):
                 "vision_per_min": performance_totals["vision_score"] / minutes,
             }
             perf = compute_perf_percentile(perf_per_min, primary_role, service._role_baselines)
-            perf_pts = perf * GAMER_SCORE_PERF_WEIGHT * 100
+            perf_pts = perf * perf_weight * 100
             perf_str = f"perf vs {role_label}: `{int(perf * 100)}th pct` \u2192 `{perf_pts:.1f}`"
         else:
             reason = "no baseline" if not service._role_baselines else "role unknown"

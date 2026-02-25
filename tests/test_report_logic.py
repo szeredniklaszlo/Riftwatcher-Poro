@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 
 from src.report_logic import (
+    compute_gamer_score,
+    compute_perf_percentile,
     create_mode_records,
     format_mode_line,
+    gamer_score_weights_for_games,
     get_match_duration_seconds,
     get_report_cycle_key,
     get_report_cycle_start_unix_seconds,
@@ -27,6 +30,69 @@ def test_wilson_lower_bound_prefers_consistent_sample():
     strong_large_sample = wilson_lower_bound(9, 1)
     perfect_tiny_sample = wilson_lower_bound(1, 0)
     assert strong_large_sample > perfect_tiny_sample
+
+
+def test_wilson_default_is_stricter_than_legacy_z():
+    default_score = wilson_lower_bound(9, 1)
+    legacy_score = wilson_lower_bound(9, 1, z=1.28)
+    assert default_score < legacy_score
+
+
+def test_gamer_score_weights_ramp_perf_component():
+    win_w_1, perf_w_1 = gamer_score_weights_for_games(1)
+    win_w_4, perf_w_4 = gamer_score_weights_for_games(4)
+    win_w_8, perf_w_8 = gamer_score_weights_for_games(8)
+    win_w_20, perf_w_20 = gamer_score_weights_for_games(20)
+
+    assert win_w_1 > win_w_4 > win_w_8
+    assert perf_w_1 < perf_w_4 < perf_w_8
+    assert perf_w_8 == perf_w_20
+
+
+def test_compute_perf_percentile_uses_metric_weights():
+    baselines = {
+        "MIDDLE": {
+            "cs_per_min": [4.0, 6.0],  # weighted higher
+            "healing_per_min": [100.0, 200.0],  # weighted lower
+        }
+    }
+    player = {
+        "cs_per_min": 6.0,  # top percentile on high-weight stat
+        "healing_per_min": 100.0,  # mid percentile on low-weight stat
+    }
+
+    weighted = compute_perf_percentile(player, "MIDDLE", baselines)
+    equal_avg = (1.0 + 0.5) / 2.0
+    assert weighted > equal_avg
+
+
+def test_compute_gamer_score_ramps_performance_weight_by_volume():
+    baselines = {
+        "MIDDLE": {
+            "cs_per_min": [4.0, 5.0, 6.0],
+            "player_damage_per_min": [300.0, 500.0, 700.0],
+        }
+    }
+    perf_totals = {
+        "minutes_total": 30.0,
+        "cs_total": 180,
+        "player_damage": 21000,
+        "objective_damage": 0,
+        "healing": 0,
+        "damage_taken": 0,
+        "kills": 0,
+        "deaths": 0,
+        "vision_score": 0,
+    }
+
+    low_volume = compute_gamer_score(1, 0, perf_totals, "MIDDLE", baselines)
+    high_volume = compute_gamer_score(12, 0, perf_totals, "MIDDLE", baselines)
+    low_volume_wilson = wilson_lower_bound(1, 0) * 100
+    high_volume_wilson = wilson_lower_bound(12, 0) * 100
+
+    # Perf contribution exists in both, but high-volume score should pull further away
+    # from pure Wilson because perf weight has fully ramped in.
+    assert abs(high_volume - high_volume_wilson) > abs(low_volume - low_volume_wilson)
 
 
 def test_rank_sort_key_orders_by_wilson_then_volume():
