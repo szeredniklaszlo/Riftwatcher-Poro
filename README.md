@@ -52,12 +52,12 @@ This project does not use Riot's official logos.
   - W/L, K/D/A, CS/min
   - player/objective damage, damage taken, healing, vision
 - Win/loss streak callouts post in `MATCH_RECAP_CHANNEL_ID` as separate messages:
-  - 3–4 wins: ✨ Momentum
-  - 5–7 wins: 🔥 Heater Alert
-  - 8+ wins: 👑 LEGENDARY
-  - 3–4 losses: 💀 Cold Streak
-  - 5–7 losses: 🚨 Tilt Watch
-  - 8+ losses: 🛑 FULL TILT
+  - 3-4 wins: Momentum
+  - 5-7 wins: Heater Alert
+  - 8+ wins: LEGENDARY
+  - 3-4 losses: Cold Streak
+  - 5-7 losses: Tilt Watch
+  - 8+ losses: FULL TILT
   - TTS is enabled by default and can be toggled with `!tts on|off|status`
 - Rank alerts post in `EVENTS_CHANNEL_ID`:
   - rank up: congratulatory message
@@ -161,3 +161,10 @@ On Windows, if `python` resolves to a WindowsApps alias, run tests with an expli
 - If Riot rate-limits (`429`), client retries with backoff.
 - Warning when recap and daily channel IDs are equal is informational only.
 - See `OPERATIONS.md` for incident response, deploy rules, and health triage steps.
+
+## Additional Documentation
+
+- `ARCHITECTURE.md` for module/runtime structure.
+- `OPERATIONS.md` for incident response and runbook steps.
+- `SESSION_NOTES.md` for latest project memory snapshot.
+- `IMPROVEMENT_BACKLOG.md` for prioritized future work.

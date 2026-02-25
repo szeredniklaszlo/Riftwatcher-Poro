@@ -1,61 +1,49 @@
 # Improvement Backlog
 
-This backlog is derived from current project docs and only includes items that are not implemented yet.
+This backlog tracks work not yet implemented as of 2026-02-25.
 
 ## Source docs reviewed
 
 - `SESSION_NOTES.md`
 - `README.md`
 - `ARCHITECTURE.md`
+- `OPERATIONS.md`
 
 ## Operational Improvements
 
-1. Add log sampling or structured metrics export for cycle latency trends
-- Source: `SESSION_NOTES.md` ("Next Improvement Candidates")
-- Current gap: cycle timing is logged, but no sampled metrics stream/export.
+1. Add lightweight metrics export for worker cycle latency and error rates
+- Current gap: cycle timings are logged, but there is no persistent metrics sink/dashboard.
+
+2. Add alerting for stalled workers
+- Current gap: worker cycles/errors are visible via `!health`, but no proactive alert when a worker stops progressing.
 
 ## Scoring V2 (Draft)
 
-2. Implement Gamer Score v2 composite model
-- Source: `SESSION_NOTES.md` ("Scoring V2 Draft (Recovered)")
-- Draft components:
-  - Bayesian smoothing: `p_bayes = (wins + a) / (games + a + b)` with `a=b=3`
-  - Confidence penalty: `conf = sqrt(games / (games + k))` with `k=8`
-  - Role-aware normalized performance component (`perf_norm`)
-  - Recency weighting component (`recency_norm`)
-  - Composite:
-    - `GamerScore = 100 * (0.65 * p_bayes * conf + 0.25 * perf_norm + 0.10 * recency_norm)`
-- Current gap: production scoring is still Wilson-based gamer score.
+3. Implement Gamer Score v2 composite model
+- Candidate components:
+  - Bayesian smoothing for win rate (`p_bayes`)
+  - Confidence/volume weighting (`conf`)
+  - role-aware normalized performance (`perf_norm`)
+  - recency weighting (`recency_norm`)
+- Current gap: production score is still Wilson-based.
 
 ## Feature Backlog
 
-3. Daily MVP and Clutch/Int awards
-- Source: `SESSION_NOTES.md` ("Future Fun Features Backlog")
+4. Daily MVP + Clutch/Int awards
+5. Head-to-head command (`!vs Name1 Name2`) for day/week
+6. Weekly title belts (Damage King, Objective Goblin, Vision Dad)
+7. Prediction game for day record guesses
+8. Profile command (`!profile Name#Tag`) with trend and best queue
+9. Party synergy stats for duo/trio combinations
+10. Seasonal month-long points race
+11. Clip/quote of the day in recap flow
+12. Weekly boss challenge mode with success/fail announcement
 
-4. Head-to-head command (`!vs Name1 Name2`) for today/week
-- Source: `SESSION_NOTES.md`
+## Recently Completed (Removed From Backlog)
 
-5. Weekly title belts (example: Damage King, Objective Goblin, Vision Dad)
-- Source: `SESSION_NOTES.md`
-
-6. Prediction game for day record guesses and points
-- Source: `SESSION_NOTES.md`
-
-7. Profile command (`!profile Name#Tag`) with trend and best queue
-- Source: `SESSION_NOTES.md`
-
-8. Party synergy stats for duo/trio combinations
-- Source: `SESSION_NOTES.md`
-
-9. Seasonal month-long points race and winner announcement
-- Source: `SESSION_NOTES.md`
-
-10. Clip or quote of the day attachment in recap flow
-- Source: `SESSION_NOTES.md`
-
-11. Weekly boss challenge mode with success/fail announcement
-- Source: `SESSION_NOTES.md`
-
-## Excluded (already implemented)
-
-- Ranked streak callouts in recap flow (with dedupe state).
+- Runtime + DB + command module split completed.
+- Streak callouts moved to separate messages and TTS toggle added.
+- `!tts` routing allowed in events + recap channels.
+- Command routing matrix tests added.
+- Recap/streak separation integration test coverage added.
+- GitLab test pipeline tightened for push + MR.
