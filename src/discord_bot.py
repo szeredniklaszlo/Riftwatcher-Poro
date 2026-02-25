@@ -100,10 +100,10 @@ REQUEST_ID_CONTEXT = contextvars.ContextVar("request_id", default=None)
 START_MONOTONIC = time.monotonic()
 RIOT_ALERT_STATE = RiotAlertState()
 WORKER_STATS = {
-    "refresh": {"cycles": 0, "errors": 0},
-    "rank": {"cycles": 0, "errors": 0},
-    "recap": {"cycles": 0, "errors": 0},
-    "backfill": {"cycles": 0, "errors": 0},
+    "refresh": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0},
+    "rank": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0},
+    "recap": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0},
+    "backfill": {"cycles": 0, "errors": 0, "runs": 0, "elapsed_ms_last": 0, "elapsed_ms_avg": 0, "elapsed_ms_max": 0, "elapsed_ms_total": 0},
 }
 def load_tracked_players():
     return db_load_tracked_players()

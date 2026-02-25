@@ -10,6 +10,31 @@ from src.discord_recap_worker import process_recap_cycle
 from src.discord_text import create_request_id, report_signature
 
 
+def _ensure_worker_stat_entry(worker_stats, worker_name):
+    entry = worker_stats.setdefault(worker_name, {})
+    entry.setdefault("cycles", 0)
+    entry.setdefault("errors", 0)
+    entry.setdefault("runs", 0)
+    entry.setdefault("elapsed_ms_last", 0)
+    entry.setdefault("elapsed_ms_avg", 0)
+    entry.setdefault("elapsed_ms_max", 0)
+    entry.setdefault("elapsed_ms_total", 0)
+    return entry
+
+
+def _record_worker_cycle(worker_stats, worker_name, *, had_error, elapsed_ms):
+    entry = _ensure_worker_stat_entry(worker_stats, worker_name)
+    entry["runs"] += 1
+    if had_error:
+        entry["errors"] += 1
+    else:
+        entry["cycles"] += 1
+    entry["elapsed_ms_last"] = int(elapsed_ms)
+    entry["elapsed_ms_total"] += int(elapsed_ms)
+    entry["elapsed_ms_max"] = max(int(entry["elapsed_ms_max"]), int(elapsed_ms))
+    entry["elapsed_ms_avg"] = int(entry["elapsed_ms_total"] / max(1, entry["runs"]))
+
+
 async def evaluate_rank_changes_and_notify(
     *,
     resolve_channel,
@@ -55,15 +80,16 @@ async def background_rank_notifier(
     while not client.is_closed():
         cycle_start = time.monotonic()
         token = request_id_context.set(create_request_id("rank"))
+        had_error = False
         try:
             await evaluate_rank_changes_and_notify_fn()
-            worker_stats["rank"]["cycles"] += 1
         except Exception as exc:
-            worker_stats["rank"]["errors"] += 1
+            had_error = True
             log(f"[rank] Unexpected background error: {exc}")
         finally:
             request_id_context.reset(token)
         elapsed = int((time.monotonic() - cycle_start) * 1000)
+        _record_worker_cycle(worker_stats, "rank", had_error=had_error, elapsed_ms=elapsed)
         log(f"[rank] Cycle complete elapsed={elapsed}ms next_sleep={sleep_seconds}s")
         await asyncio.sleep(sleep_seconds)
 
@@ -96,6 +122,7 @@ async def background_match_recap_notifier(
     while not client.is_closed():
         cycle_start = time.monotonic()
         token = request_id_context.set(create_request_id("recap"))
+        had_error = False
         try:
             channel = await resolve_channel(match_recap_channel_id)
             if channel is None:
@@ -117,13 +144,13 @@ async def background_match_recap_notifier(
                 edit_last_weekly_report_message=edit_last_weekly_report_message,
                 log=log,
             )
-            worker_stats["recap"]["cycles"] += 1
         except Exception as exc:
-            worker_stats["recap"]["errors"] += 1
+            had_error = True
             log(f"[recap] Unexpected error: {exc}")
         finally:
             request_id_context.reset(token)
         elapsed = int((time.monotonic() - cycle_start) * 1000)
+        _record_worker_cycle(worker_stats, "recap", had_error=had_error, elapsed_ms=elapsed)
         log(f"[recap] Cycle complete elapsed={elapsed}ms next_sleep={sleep_seconds}s")
         await asyncio.sleep(sleep_seconds)
 
@@ -157,6 +184,7 @@ async def background_match_cache_backfiller(
     while not client.is_closed():
         cycle_start = time.monotonic()
         token = request_id_context.set(create_request_id("backfill"))
+        had_error = False
         try:
             total_backfilled = await process_backfill_cycle(
                 friends=friends,
@@ -175,13 +203,13 @@ async def background_match_cache_backfiller(
                 f"[backfill] Cycle summary: cached={total_backfilled}, "
                 f"active_offsets={active_offsets}/{len(friends)}, max_offset={max_offset}."
             )
-            worker_stats["backfill"]["cycles"] += 1
         except Exception as exc:
-            worker_stats["backfill"]["errors"] += 1
+            had_error = True
             log(f"[backfill] Unexpected background error: {exc}")
         finally:
             request_id_context.reset(token)
         elapsed = int((time.monotonic() - cycle_start) * 1000)
+        _record_worker_cycle(worker_stats, "backfill", had_error=had_error, elapsed_ms=elapsed)
         log(f"[backfill] Cycle complete elapsed={elapsed}ms next_sleep={backfill_interval_seconds}s")
         await asyncio.sleep(backfill_interval_seconds)
 
@@ -219,6 +247,7 @@ async def background_daily_refresher(
     while not client.is_closed():
         cycle_start = time.monotonic()
         token = request_id_context.set(create_request_id("bg"))
+        had_error = False
         try:
             async def push_snapshot_update(force=False):
                 nonlocal last_snapshot_push_at, last_snapshot_signature
@@ -276,12 +305,12 @@ async def background_daily_refresher(
                     f"[refresh] Match cache cleanup complete: deleted={deleted}, "
                     f"retention_days={match_cache_retention_days}"
                 )
-            worker_stats["refresh"]["cycles"] += 1
         except Exception as exc:
-            worker_stats["refresh"]["errors"] += 1
+            had_error = True
             log(f"[refresh] Unexpected error: {exc}")
         finally:
             request_id_context.reset(token)
         elapsed = int((time.monotonic() - cycle_start) * 1000)
+        _record_worker_cycle(worker_stats, "refresh", had_error=had_error, elapsed_ms=elapsed)
         log(f"[refresh] Cycle complete elapsed={elapsed}ms next_sleep={sleep_seconds}s")
         await asyncio.sleep(sleep_seconds)

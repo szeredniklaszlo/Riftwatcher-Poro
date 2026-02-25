@@ -62,7 +62,16 @@ async def handle_ops_commands(ctx):
         wstats = stats.get("worker_stats") or {}
         workers_line = ""
         if wstats:
-            parts = [f"{k}: {v['cycles']}ok/{v['errors']}err" for k, v in wstats.items()]
+            parts = []
+            for key, value in wstats.items():
+                segment = f"{key}: {value['cycles']}ok/{value['errors']}err"
+                if "elapsed_ms_last" in value:
+                    segment += (
+                        f" ({value.get('elapsed_ms_last', 0)}ms last/"
+                        f"{value.get('elapsed_ms_avg', 0)}ms avg/"
+                        f"{value.get('elapsed_ms_max', 0)}ms max)"
+                    )
+                parts.append(segment)
             workers_line = f"\n- Workers: `{' | '.join(parts)}`"
         baseline_age_seconds = stats.get("baseline_age_seconds")
         if baseline_age_seconds is None:

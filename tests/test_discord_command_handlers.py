@@ -603,3 +603,51 @@ def test_health_command_includes_backfill_status():
     assert "Backfill cursors active" in text
     assert "Backfill max offset" in text
     assert "Alpha#NA1=400" in text
+
+
+def test_health_command_includes_worker_latency_metrics_when_available():
+    channel = FakeChannel(channel_id=999)
+    incoming = FakeIncomingMessage("!health", channel)
+    mood_service = FakeMoodService(build_outputs=["unused"])
+    riot_client = FakeRiotClient()
+    worker_stats = {
+        "refresh": {
+            "cycles": 10,
+            "errors": 1,
+            "runs": 11,
+            "elapsed_ms_last": 1200,
+            "elapsed_ms_avg": 980,
+            "elapsed_ms_max": 3000,
+            "elapsed_ms_total": 10780,
+        }
+    }
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            channel_id=777,
+            friends=["Alpha#NA1"],
+            riot_client=riot_client,
+            mood_service=mood_service,
+            report_timezone_name="UTC",
+            report_day_start_hour=9,
+            db_enabled=True,
+            start_monotonic=0.0,
+            mood_request_lock=asyncio.Lock(),
+            request_id_context=contextvars.ContextVar("request_id", default=None),
+            create_request_id=lambda _prefix: "health-5678",
+            get_or_create_report_message=lambda _channel, _initial_content: None,
+            remember_report_message=lambda _message: None,
+            normalize_riot_id=lambda riot_id: riot_id,
+            db_upsert_player=lambda _riot_id, _puuid: None,
+            log=lambda _msg: None,
+            weekly_report_channel_id=888,
+            events_channel_id=999,
+            worker_stats=worker_stats,
+        )
+    )
+
+    assert len(channel.sent_messages) == 1
+    text = channel.sent_messages[0].content
+    assert "refresh: 10ok/1err" in text
+    assert "1200ms last/980ms avg/3000ms max" in text
