@@ -1,111 +1,8 @@
-import asyncio
-from datetime import timedelta
-
-import discord
-import requests
-
-from src.constants import (
-    ADD_COMMAND,
-    DEBUG_PLAYER_COMMAND,
-    HEALTH_COMMAND,
-    HELP_COMMAND,
-    MOOD_COMMAND,
-    RIOT_TEST_COMMAND,
-    SCORE_COMMAND,
-    STREAK_COMMAND,
-    TEST_COMMAND,
-    TTS_COMMAND,
-    WEEK_COMMAND,
-)
-from src.discord_recap_worker import get_ranked_streak_info
-from src.discord_text import (
-    format_streak_callout,
-    parse_streak_tts_enabled,
-    streak_callout_state_key,
-    streak_tts_enabled_state_key,
-)
-
-
-def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_id, events_channel_id, match_recap_channel_id=None):
-    daily_channel_ref = f"<#{daily_channel_id}>"
-    weekly_channel_ref = f"<#{weekly_channel_id}>" if weekly_channel_id else daily_channel_ref
-    events_channel_ref = f"<#{events_channel_id}>"
-    return (
-        "**MoodBot commands**\n"
-        f"- `{MOOD_COMMAND}`: Refresh daily scoreboard (run in {daily_channel_ref}).\n"
-        f"- `{WEEK_COMMAND}`: Refresh weekly scoreboard for Monday `{report_day_start_hour:02d}:00` -> next Monday "
-        f"`{report_day_start_hour:02d}:00` (run/post in {weekly_channel_ref}).\n"
-        f"- `{ADD_COMMAND} Name#Tag`: Add a tracked Riot ID (run in {events_channel_ref}).\n"
-        f"- `{DEBUG_PLAYER_COMMAND} Name#Tag`: Show queue/window debug details (run in {events_channel_ref}).\n"
-        f"- `{HEALTH_COMMAND}`: Show bot/DB/cache health (run in {events_channel_ref}).\n"
-        f"- `{SCORE_COMMAND}`: Show how each player's Gamer Score is calculated today (run in {events_channel_ref}).\n"
-        f"- `{RIOT_TEST_COMMAND}`: Verify Riot API connectivity (run in {events_channel_ref}).\n"
-        f"- `{TEST_COMMAND}`: Verify Discord send permissions (run in {events_channel_ref}).\n"
-        f"- `{STREAK_COMMAND} Name#Tag`: Manually post current win/loss streak callout (run in {f'<#{match_recap_channel_id}>' if match_recap_channel_id else events_channel_ref}).\n"
-        f"- `{TTS_COMMAND} on|off|status`: Toggle streak alert TTS (run in {events_channel_ref} or {f'<#{match_recap_channel_id}>' if match_recap_channel_id else events_channel_ref}).\n"
-        f"- `{HELP_COMMAND}`: Show this help (run in {events_channel_ref})."
-    )
-
-
-def is_supported_command(content_lower):
-    known_exact = {
-        TEST_COMMAND.casefold(),
-        RIOT_TEST_COMMAND.casefold(),
-        MOOD_COMMAND.casefold(),
-        WEEK_COMMAND.casefold(),
-        ADD_COMMAND.casefold(),
-        DEBUG_PLAYER_COMMAND.casefold(),
-        HEALTH_COMMAND.casefold(),
-        HELP_COMMAND.casefold(),
-        SCORE_COMMAND.casefold(),
-        TTS_COMMAND.casefold(),
-    }
-    if content_lower in known_exact:
-        return True
-    return (
-        content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
-        or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
-        or content_lower.startswith(f"{STREAK_COMMAND.casefold()} ")
-        or content_lower.startswith(f"{TTS_COMMAND.casefold()} ")
-    )
-
-
-def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, events_channel_id, match_recap_channel_id=None):
-    if content_lower == MOOD_COMMAND.casefold():
-        return daily_channel_id
-    if content_lower == WEEK_COMMAND.casefold():
-        return weekly_channel_id
-    if (
-        content_lower == STREAK_COMMAND.casefold()
-        or content_lower.startswith(f"{STREAK_COMMAND.casefold()} ")
-    ):
-        return match_recap_channel_id or events_channel_id
-    if (
-        content_lower == TTS_COMMAND.casefold()
-        or content_lower.startswith(f"{TTS_COMMAND.casefold()} ")
-    ):
-        allowed = [events_channel_id]
-        if match_recap_channel_id and match_recap_channel_id != events_channel_id:
-            allowed.append(match_recap_channel_id)
-        return tuple(allowed)
-
-    if (
-        content_lower in {
-            TEST_COMMAND.casefold(),
-            RIOT_TEST_COMMAND.casefold(),
-            ADD_COMMAND.casefold(),
-            DEBUG_PLAYER_COMMAND.casefold(),
-            HEALTH_COMMAND.casefold(),
-            HELP_COMMAND.casefold(),
-            SCORE_COMMAND.casefold(),
-            TTS_COMMAND.casefold(),
-        }
-        or content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
-        or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
-        or content_lower.startswith(f"{TTS_COMMAND.casefold()} ")
-    ):
-        return events_channel_id
-    return None
+from src.commands.context import CommandHandlerContext
+from src.commands.ops_handlers import handle_ops_commands
+from src.commands.player_handlers import handle_player_commands
+from src.commands.report_handlers import handle_report_commands
+from src.commands.routing import command_channel_id, enforce_command_channel, format_help_text, is_supported_command
 
 
 async def handle_incoming_message(
@@ -143,336 +40,43 @@ async def handle_incoming_message(
     weekly_channel_id = weekly_report_channel_id or daily_channel_id
     events_channel_id = events_channel_id or daily_channel_id
 
-    if content.startswith("!") and is_supported_command(content_lower):
-        expected_channel_id = command_channel_id(
-            content_lower,
-            daily_channel_id=daily_channel_id,
-            weekly_channel_id=weekly_channel_id,
-            events_channel_id=events_channel_id,
-            match_recap_channel_id=match_recap_channel_id,
-        )
-        if expected_channel_id is not None:
-            if isinstance(expected_channel_id, tuple):
-                if message.channel.id not in expected_channel_id:
-                    channel_refs = " or ".join(f"<#{cid}>" for cid in expected_channel_id)
-                    await message.channel.send(
-                        f"Use `{content.split(' ', 1)[0]}` in {channel_refs}."
-                    )
-                    return
-            elif message.channel.id != expected_channel_id:
-                await message.channel.send(
-                    f"Use `{content.split(' ', 1)[0]}` in <#{expected_channel_id}>."
-                )
-                return
+    ctx = CommandHandlerContext(
+        message=message,
+        content=content,
+        content_lower=content_lower,
+        daily_channel_id=daily_channel_id,
+        weekly_channel_id=weekly_channel_id,
+        events_channel_id=events_channel_id,
+        match_recap_channel_id=match_recap_channel_id,
+        friends=friends,
+        riot_client=riot_client,
+        mood_service=mood_service,
+        report_timezone_name=report_timezone_name,
+        report_day_start_hour=report_day_start_hour,
+        db_enabled=db_enabled,
+        start_monotonic=start_monotonic,
+        mood_request_lock=mood_request_lock,
+        request_id_context=request_id_context,
+        create_request_id=create_request_id,
+        get_or_create_report_message=get_or_create_report_message,
+        remember_report_message=remember_report_message,
+        normalize_riot_id=normalize_riot_id,
+        db_upsert_player=db_upsert_player,
+        log=log,
+        get_or_create_weekly_report_message=get_or_create_weekly_report_message,
+        remember_weekly_report_message=remember_weekly_report_message,
+        weekly_report_channel_id=weekly_report_channel_id,
+        resolve_channel=resolve_channel,
+        worker_stats=worker_stats,
+        db_get_state=db_get_state,
+        db_set_state=db_set_state,
+    )
 
-    if content_lower == HELP_COMMAND.casefold():
-        await message.channel.send(
-            format_help_text(
-                report_day_start_hour=report_day_start_hour,
-                daily_channel_id=daily_channel_id,
-                weekly_channel_id=weekly_channel_id,
-                events_channel_id=events_channel_id,
-                match_recap_channel_id=match_recap_channel_id,
-            )
-        )
+    if await enforce_command_channel(ctx):
         return
-
-    if content_lower == TEST_COMMAND.casefold():
-        await message.channel.send("API test: MoodBot is online and can send messages.")
-        log(f"[test] Sent API test message in channel {message.channel.id}.")
+    if await handle_ops_commands(ctx):
         return
-
-    if content_lower == RIOT_TEST_COMMAND.casefold():
-        if not friends:
-            await message.channel.send(
-                f"Riot API test skipped: no tracked players in database. Add one with `{ADD_COMMAND} Name#Tag`."
-            )
-            return
-        try:
-            riot_id, puuid, match_count = await riot_client.run_riot_connectivity_test(friends[0])
-            await message.channel.send(
-                f"Riot API test OK for `{riot_id}`. Retrieved puuid and {match_count} matches."
-            )
-            log(f"[test] Riot API test succeeded for {riot_id} ({puuid[:8]}...).")
-        except (KeyError, requests.RequestException) as exc:
-            await message.channel.send(f"Riot API test failed: {exc}")
-            log(f"[test] Riot API test failed: {exc}")
+    if await handle_player_commands(ctx):
         return
-
-    if content_lower == HEALTH_COMMAND.casefold():
-        stats = await mood_service.run_health_check(start_monotonic, worker_stats=worker_stats)
-        uptime = str(timedelta(seconds=stats["uptime_seconds"]))
-        top_backfill_offsets = ", ".join(stats.get("top_backfill_offsets", [])) or "none"
-        wstats = stats.get("worker_stats") or {}
-        workers_line = ""
-        if wstats:
-            parts = [f"{k}: {v['cycles']}ok/{v['errors']}err" for k, v in wstats.items()]
-            workers_line = f"\n- Workers: `{' | '.join(parts)}`"
-        baseline_age_seconds = stats.get("baseline_age_seconds")
-        if baseline_age_seconds is None:
-            baseline_line = "\n- Gamer Score baselines: `not yet built`"
-        else:
-            age = str(timedelta(seconds=baseline_age_seconds))
-            baseline_line = (
-                f"\n- Gamer Score baselines: "
-                f"`{stats['baseline_roles']} roles, {stats['baseline_samples']} samples (built {age} ago)`"
-            )
-        await message.channel.send(
-            (
-                f"Health OK\n"
-                f"- Uptime: `{uptime}`\n"
-                f"- Tracked players: `{stats['tracked_players']}`\n"
-                f"- DB: `{'ok' if stats['db_ok'] else 'down'}`\n"
-                f"- Match cache entries: `{stats['match_cache_entries']}`\n"
-                f"- Report cache active: `{'yes' if stats['request_cache_active'] else 'no'}`\n"
-                f"- Backfill cursors active: `{stats.get('players_with_backfill_offset', 0)}/{stats['tracked_players']}`\n"
-                f"- Backfill max offset: `{stats.get('max_backfill_offset', 0)}`\n"
-                f"- Backfill top offsets: `{top_backfill_offsets}`"
-                f"{baseline_line}"
-                f"{workers_line}"
-            )
-        )
-        log("[health] Sent health status message.")
+    if await handle_report_commands(ctx):
         return
-
-    if content_lower == SCORE_COMMAND.casefold():
-        report = await mood_service.build_score_breakdown_report()
-        await message.channel.send(report)
-        log("[score] Sent score breakdown.")
-        return
-
-    if content_lower == TTS_COMMAND.casefold():
-        await message.channel.send(f"Usage: `{TTS_COMMAND} on|off|status`")
-        return
-
-    if content_lower.startswith(f"{TTS_COMMAND.casefold()} "):
-        arg = content[len(TTS_COMMAND):].strip().lower()
-        state_key = streak_tts_enabled_state_key()
-        if arg == "status":
-            raw_value = None
-            if db_get_state is not None:
-                raw_value = await asyncio.to_thread(db_get_state, state_key)
-            enabled = parse_streak_tts_enabled(raw_value, default=True)
-            await message.channel.send(
-                f"Streak alert TTS is currently `{'ON' if enabled else 'OFF'}`."
-            )
-            return
-        if arg not in {"on", "off"}:
-            await message.channel.send(f"Usage: `{TTS_COMMAND} on|off|status`")
-            return
-
-        enabled = arg == "on"
-        if db_set_state is not None:
-            await asyncio.to_thread(db_set_state, state_key, "1" if enabled else "0")
-        await message.channel.send(
-            f"Streak alert TTS is now `{'ON' if enabled else 'OFF'}`."
-        )
-        log(f"[tts] Streak alert TTS set to {'ON' if enabled else 'OFF'}.")
-        return
-
-    if content_lower == DEBUG_PLAYER_COMMAND.casefold():
-        await message.channel.send(f"Usage: `{DEBUG_PLAYER_COMMAND} Name#Tag`")
-        return
-
-    if content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} "):
-        raw_riot_id = content[len(DEBUG_PLAYER_COMMAND):].strip()
-        status_message = await message.channel.send(f"\u23F3 Building debug report for `{raw_riot_id}`...")
-        try:
-            report_text = await riot_client.build_debug_player_report(
-                raw_riot_id,
-                report_timezone_name=report_timezone_name,
-                normalize_riot_id=normalize_riot_id,
-            )
-            if len(report_text) > 1900:
-                report_text = report_text[:1900] + "\n...truncated..."
-            await status_message.edit(content=f"```text\n{report_text}\n```")
-        except ValueError as exc:
-            await status_message.edit(content=f"Debug report failed: {exc}")
-        except (KeyError, requests.RequestException) as exc:
-            await status_message.edit(content=f"Debug report failed: {exc}")
-            log(f"[debug] Debug report failed: {exc}")
-        return
-
-    if content_lower == MOOD_COMMAND.casefold():
-        request_id = create_request_id("mood")
-        token = request_id_context.set(request_id)
-        try:
-            await message.delete()
-        except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
-            log(f"[mood] Could not delete command message {message.id}: {exc}")
-
-        try:
-            if mood_request_lock.locked():
-                await message.channel.send("\u23F3 Another report is already in progress. Please wait.")
-                return
-
-            async with mood_request_lock:
-                loading_text = (
-                    f"\u23F3 Gathering match results since {report_day_start_hour:02d}:00 from Riot..."
-                )
-                status_message = await get_or_create_report_message(message.channel, loading_text)
-                if status_message.content != loading_text:
-                    await status_message.edit(content=loading_text)
-                try:
-                    if db_enabled:
-                        snapshot_text = await mood_service.build_today_win_rate_report()
-                        refresh_note = "_Refreshing latest matches..._"
-                        snapshot_with_note = f"{snapshot_text}\n\n{refresh_note}"
-                        if len(snapshot_with_note) > 2000:
-                            snapshot_with_note = snapshot_text
-                        await status_message.edit(content=snapshot_with_note)
-                        displayed_text = snapshot_with_note
-                        remember_report_message(status_message)
-                        log(f"[mood] Sent stored snapshot report in channel {daily_channel_id}.")
-
-                        await mood_service.refresh_recent_matches_snapshot(recent_count=20)
-                        refreshed_text = await mood_service.build_today_win_rate_report()
-                        if refreshed_text != displayed_text:
-                            await status_message.edit(content=refreshed_text)
-                            log(f"[mood] Updated report after quick refresh in channel {daily_channel_id}.")
-                        else:
-                            log("[mood] Quick refresh produced no visible report change.")
-                    else:
-                        async def progress(done, total, last_name):
-                            await status_message.edit(
-                                content=(
-                                    f"\u23F3 Gathering match results since {report_day_start_hour:02d}:00 "
-                                    f"from Riot... ({done}/{total}) `{last_name}`"
-                                )
-                            )
-
-                        report_text = await mood_service.build_today_win_rate_report(progress_callback=progress)
-                        await status_message.edit(content=report_text)
-                        remember_report_message(status_message)
-                        log(
-                            f"[mood] Sent cycle win rate report (since {report_day_start_hour:02d}:00) "
-                            f"in channel {daily_channel_id}."
-                        )
-                except (KeyError, requests.RequestException) as exc:
-                    await status_message.edit(content=f"Mood report failed: {exc}")
-                    log(f"[mood] Mood report failed: {exc}")
-                except Exception as exc:
-                    await status_message.edit(content=f"Mood report failed unexpectedly: {exc}")
-                    log(f"[mood] Unexpected mood report failure: {exc}")
-        finally:
-            request_id_context.reset(token)
-        return
-
-    if content_lower == WEEK_COMMAND.casefold():
-        request_id = create_request_id("week")
-        token = request_id_context.set(request_id)
-        try:
-            await message.delete()
-        except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
-            log(f"[week] Could not delete command message {message.id}: {exc}")
-
-        try:
-            if mood_request_lock.locked():
-                await message.channel.send("\u23F3 Another report is already in progress. Please wait.")
-                return
-
-            async with mood_request_lock:
-                if get_or_create_weekly_report_message is None:
-                    await message.channel.send("Weekly report is not configured.")
-                    return
-                target_channel = message.channel
-                if weekly_report_channel_id is not None and resolve_channel is not None:
-                    resolved_channel = await resolve_channel(weekly_report_channel_id)
-                    if resolved_channel is None:
-                        await message.channel.send("Weekly report failed: could not access weekly report channel.")
-                        return
-                    target_channel = resolved_channel
-                loading_text = (
-                    "\u23F3 Building weekly report "
-                    f"(Monday {report_day_start_hour:02d}:00 -> next Monday {report_day_start_hour:02d}:00) "
-                    "from stored stats..."
-                )
-                status_message = await get_or_create_weekly_report_message(target_channel, loading_text)
-                if status_message.content != loading_text:
-                    await status_message.edit(content=loading_text)
-                report_text = await mood_service.build_weekly_win_rate_report(bypass_cache=True)
-                await status_message.edit(content=report_text)
-                if remember_weekly_report_message is not None:
-                    remember_weekly_report_message(status_message)
-                target_channel_id = getattr(target_channel, "id", weekly_report_channel_id)
-                log(f"[week] Sent weekly report in channel {target_channel_id}.")
-        except Exception as exc:
-            await message.channel.send(f"Weekly report failed: {exc}")
-            log(f"[week] Weekly report failed: {exc}")
-        finally:
-            request_id_context.reset(token)
-        return
-
-    if content_lower == STREAK_COMMAND.casefold():
-        await message.channel.send(f"Usage: `{STREAK_COMMAND} Name#Tag`")
-        return
-
-    if content_lower.startswith(f"{STREAK_COMMAND.casefold()} "):
-        raw_riot_id = content[len(STREAK_COMMAND):].strip()
-        try:
-            riot_id = normalize_riot_id(raw_riot_id)
-        except ValueError as exc:
-            await message.channel.send(f"Streak lookup failed: {exc}")
-            return
-        status_message = await message.channel.send(f"\u23F3 Looking up streak for `{riot_id}`...")
-        try:
-            puuid = await riot_client.fetch_puuid(riot_id)
-            recent_ids = await riot_client.fetch_recent_match_ids(puuid, count=20, riot_id=riot_id)
-            streak_count, is_win_streak = await get_ranked_streak_info(riot_client, puuid, recent_ids)
-            if streak_count < 3 or is_win_streak is None:
-                await status_message.edit(content=f"`{riot_id}` has no active ranked streak (fewer than 3 in a row).")
-            else:
-                callout = format_streak_callout(riot_id, streak_count, is_win_streak)
-                await status_message.delete()
-                tts_enabled = True
-                if db_get_state is not None:
-                    raw_tts = await asyncio.to_thread(db_get_state, streak_tts_enabled_state_key())
-                    tts_enabled = parse_streak_tts_enabled(raw_tts, default=True)
-                await message.channel.send(callout, tts=tts_enabled)
-                if db_set_state is not None:
-                    streak_token = f"{'W' if is_win_streak else 'L'}:{streak_count}"
-                    await asyncio.to_thread(db_set_state, streak_callout_state_key(riot_id), streak_token)
-                log(f"[streak] Manual streak callout posted for {riot_id} ({streak_count} {'wins' if is_win_streak else 'losses'}).")
-        except (KeyError, requests.RequestException) as exc:
-            await status_message.edit(content=f"Streak lookup failed for `{riot_id}`: {exc}")
-            log(f"[streak] Streak lookup failed for {riot_id}: {exc}")
-        return
-
-    if content_lower == ADD_COMMAND.casefold():
-        await message.channel.send(f"Usage: `{ADD_COMMAND} Name#Tag`")
-        return
-
-    if content_lower.startswith(f"{ADD_COMMAND.casefold()} "):
-        raw_riot_id = content[len(ADD_COMMAND):].strip()
-        try:
-            riot_id = normalize_riot_id(raw_riot_id)
-        except ValueError as exc:
-            await message.channel.send(f"Add failed: {exc}")
-            return
-
-        if any(existing.casefold() == riot_id.casefold() for existing in friends):
-            await message.channel.send(f"`{riot_id}` is already tracked.")
-            return
-
-        status_message = await message.channel.send(f"\u23F3 Validating `{riot_id}` with Riot API...")
-        try:
-            await riot_client.fetch_puuid(riot_id)
-        except (KeyError, requests.RequestException) as exc:
-            await status_message.edit(content=f"Add failed for `{riot_id}`: {exc}")
-            return
-
-        friends.append(riot_id)
-        try:
-            await asyncio.to_thread(db_upsert_player, riot_id, None)
-        except Exception as exc:
-            await status_message.edit(content=f"Added `{riot_id}`, but failed to persist to postgres: {exc}")
-            return
-
-        await status_message.edit(
-            content=(
-                f"\u2705 Added `{riot_id}` and saved to postgres. "
-                f"Total tracked players: {len(friends)}"
-            )
-        )
-        mood_service.invalidate_report_cache()
-        log(f"[add] Added player {riot_id}.")
