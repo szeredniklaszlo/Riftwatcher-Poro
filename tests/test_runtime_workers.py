@@ -122,6 +122,7 @@ def test_background_daily_refresher_updates_runtime_cleanup_state(monkeypatch):
 
     monkeypatch.setattr(runtime_workers.random, "uniform", lambda _a, _b: 0.0)
     monkeypatch.setattr(runtime_workers.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(runtime_workers.time, "monotonic", lambda: 5000.0)
 
     asyncio.run(
         runtime_workers.background_daily_refresher(
