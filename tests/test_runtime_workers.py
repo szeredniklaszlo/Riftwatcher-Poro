@@ -63,3 +63,91 @@ def test_evaluate_rank_changes_and_notify_invokes_process_cycle(monkeypatch):
     assert called["kwargs"] is not None
     assert called["kwargs"]["friends"] == friends
     assert called["kwargs"]["riot_client"] is riot_client
+
+
+def test_background_daily_refresher_updates_runtime_cleanup_state(monkeypatch):
+    class FakeClient:
+        def __init__(self):
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+    class FakeMessage:
+        def __init__(self):
+            self.id = 9
+            self.content = "old"
+            self.edits = []
+
+        async def edit(self, *, content):
+            self.content = content
+            self.edits.append(content)
+
+    class FakeChannel:
+        id = 123
+
+    class FakeMoodService:
+        async def build_today_win_rate_report(self, prefer_snapshot=False, bypass_cache=False):
+            _ = (prefer_snapshot, bypass_cache)
+            return "snapshot"
+
+        async def refresh_daily_stats_once(self, progress_callback=None):
+            if progress_callback is not None:
+                await progress_callback(1, 1, "Alpha#NA1")
+
+    client = FakeClient()
+    message = FakeMessage()
+    cleanup_calls = []
+    weekly_calls = []
+    logs = []
+    worker_stats = {"refresh": {"cycles": 0, "errors": 0}}
+    report_state = {"channel_id": 123, "message_id": 9}
+    runtime_state = {"last_cache_cleanup_at": 0.0}
+
+    async def fake_sleep(_seconds):
+        client.closed = True
+
+    async def fake_resolve_channel(_channel_id):
+        return FakeChannel()
+
+    async def fake_get_or_create_report_message(_channel, _initial_content):
+        return message
+
+    async def fake_edit_weekly(*, bypass_cache=False):
+        weekly_calls.append(bypass_cache)
+
+    def fake_cleanup(retention_days):
+        cleanup_calls.append(retention_days)
+        return 3
+
+    monkeypatch.setattr(runtime_workers.random, "uniform", lambda _a, _b: 0.0)
+    monkeypatch.setattr(runtime_workers.asyncio, "sleep", fake_sleep)
+
+    asyncio.run(
+        runtime_workers.background_daily_refresher(
+            db_enabled=True,
+            daily_refresh_seconds=30,
+            client=client,
+            request_id_context=__import__("contextvars").ContextVar("request_id", default=None),
+            mood_service=FakeMoodService(),
+            resolve_channel=fake_resolve_channel,
+            daily_report_channel_id=123,
+            get_or_create_report_message=fake_get_or_create_report_message,
+            edit_last_weekly_report_message=fake_edit_weekly,
+            db_cleanup_old_match_cache=fake_cleanup,
+            match_cache_retention_days=10,
+            db_set_last_report_message=lambda _channel_id, _message_id: None,
+            report_state=report_state,
+            runtime_state=runtime_state,
+            worker_stats=worker_stats,
+            log=logs.append,
+        )
+    )
+
+    assert worker_stats["refresh"]["cycles"] == 1
+    assert worker_stats["refresh"]["errors"] == 0
+    assert message.edits
+    assert cleanup_calls == [10]
+    assert weekly_calls == [True]
+    assert runtime_state["last_cache_cleanup_at"] > 0.0
+    assert "last_cache_cleanup_at" not in report_state

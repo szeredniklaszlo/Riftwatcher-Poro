@@ -119,7 +119,6 @@ MOOD_REQUEST_LOCK = asyncio.Lock()
 
 MESSAGE_STATE = create_message_state()
 LAST_REPORT_MESSAGE = MESSAGE_STATE["last_report_message"]
-LAST_PREVIOUS_REPORT_MESSAGE = MESSAGE_STATE["last_previous_report_message"]
 LAST_WEEKLY_REPORT_MESSAGE = MESSAGE_STATE["last_weekly_report_message"]
 REPORT_RUNTIME_STATE = {"last_cache_cleanup_at": 0.0}
 STARTUP_SCOREBOARD_INIT_DONE = False
@@ -207,29 +206,6 @@ def remember_weekly_report_message(message):
         db_enabled=DB_ENABLED,
         db_set_last_weekly_report_message=db_set_last_weekly_report_message,
     )
-
-
-def build_previous_day_placeholder_text():
-    return (
-        "✨------ **LEAGUE MOOD (PREVIOUS DAY)** ------✨\n\n"
-        "No previous-day snapshot available yet.\n\n"
-        "✨--------------------------------------------✨"
-    )
-
-
-def format_previous_day_report_text(report_text, cycle_key):
-    title = "PREVIOUS DAY"
-    try:
-        day_label = datetime.fromisoformat(str(cycle_key)).strftime("%d.%m.%Y")
-        title = f"PREVIOUS DAY - {day_label}"
-    except (TypeError, ValueError):
-        pass
-
-    lines = str(report_text or "").splitlines()
-    if not lines:
-        return build_previous_day_placeholder_text()
-    lines[0] = f"✨------ **LEAGUE MOOD ({title})** ------✨"
-    return "\n".join(lines)
 
 
 async def resolve_channel(channel_id):

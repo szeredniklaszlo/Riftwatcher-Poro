@@ -5,6 +5,7 @@ from src.runtime.alerts import (
     mark_riot_401_alert_sent,
     riot_401_alert_already_sent,
     send_riot_key_expired_alert,
+    trigger_riot_key_alert,
 )
 
 
@@ -53,3 +54,87 @@ def test_send_riot_key_expired_alert_posts_to_events_channel():
     assert len(channel.sent) == 1
     assert "401 Unauthorized" in channel.sent[0]
     assert any("expiry alert" in entry for entry in logs)
+
+
+def test_trigger_riot_key_alert_marks_only_after_success(monkeypatch):
+    db = {}
+    logs = []
+
+    class FakeClient:
+        def __init__(self, loop):
+            self.loop = loop
+
+    class FakeFuture:
+        pass
+
+    def fake_run_coroutine_threadsafe(coro, loop):
+        loop.create_task(coro)
+        return FakeFuture()
+
+    monkeypatch.setattr("src.runtime.alerts.asyncio.run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
+
+    async def scenario():
+        state = RiotAlertState()
+        channel = FakeChannel()
+        client = FakeClient(asyncio.get_running_loop())
+        async def resolve_channel(_channel_id):
+            return channel
+        trigger_riot_key_alert(
+            state=state,
+            client=client,
+            resolve_channel=resolve_channel,
+            events_channel_id=123,
+            db_get_state=lambda key: db.get(key),
+            db_set_state=lambda key, value: db.update({key: value}),
+            log=logs.append,
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert state.riot_401_alert_sent is True
+        assert db.get("riot_401_alert_sent") == "1"
+
+    asyncio.run(scenario())
+
+
+def test_trigger_riot_key_alert_does_not_mark_when_send_fails(monkeypatch):
+    db = {}
+    logs = []
+
+    class FakeClient:
+        def __init__(self, loop):
+            self.loop = loop
+
+    class FakeFuture:
+        pass
+
+    class FailingChannel:
+        async def send(self, _content):
+            raise RuntimeError("send failed")
+
+    def fake_run_coroutine_threadsafe(coro, loop):
+        loop.create_task(coro)
+        return FakeFuture()
+
+    monkeypatch.setattr("src.runtime.alerts.asyncio.run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
+
+    async def scenario():
+        state = RiotAlertState()
+        client = FakeClient(asyncio.get_running_loop())
+        async def resolve_channel(_channel_id):
+            return FailingChannel()
+        trigger_riot_key_alert(
+            state=state,
+            client=client,
+            resolve_channel=resolve_channel,
+            events_channel_id=123,
+            db_get_state=lambda key: db.get(key),
+            db_set_state=lambda key, value: db.update({key: value}),
+            log=logs.append,
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert state.riot_401_alert_sent is False
+        assert db.get("riot_401_alert_sent") is None
+        assert any("Failed to send" in entry for entry in logs)
+
+    asyncio.run(scenario())

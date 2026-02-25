@@ -63,9 +63,9 @@ def remember_weekly_report_message(*, state, message, db_enabled, db_set_last_we
 
 def build_previous_day_placeholder_text():
     return (
-        "âœ¨------ **LEAGUE MOOD (PREVIOUS DAY)** ------âœ¨\n\n"
+        "\u2728------ **LEAGUE MOOD (PREVIOUS DAY)** ------\u2728\n\n"
         "No previous-day snapshot available yet.\n\n"
-        "âœ¨--------------------------------------------âœ¨"
+        "\u2728--------------------------------------------\u2728"
     )
 
 
@@ -80,7 +80,7 @@ def format_previous_day_report_text(report_text, cycle_key):
     lines = str(report_text or "").splitlines()
     if not lines:
         return build_previous_day_placeholder_text()
-    lines[0] = f"âœ¨------ **LEAGUE MOOD ({title})** ------âœ¨"
+    lines[0] = f"\u2728------ **LEAGUE MOOD ({title})** ------\u2728"
     return "\n".join(lines)
 
 

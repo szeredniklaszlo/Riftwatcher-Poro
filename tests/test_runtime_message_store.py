@@ -1,5 +1,8 @@
 from src.runtime.message_store import (
+    build_previous_day_placeholder_text,
     create_message_state,
+    format_previous_day_report_text,
+    get_or_create_report_message,
     remember_previous_report_message,
     remember_report_message,
     remember_weekly_report_message,
@@ -15,6 +18,30 @@ class FakeMessage:
     def __init__(self, channel_id, message_id):
         self.channel = FakeChannel(channel_id)
         self.id = message_id
+        self.content = ""
+        self.edits = []
+
+    async def edit(self, *, content):
+        self.content = content
+        self.edits.append(content)
+
+
+class FakeFetchChannel(FakeChannel):
+    def __init__(self, channel_id, messages):
+        super().__init__(channel_id)
+        self._messages = messages
+        self.sent = []
+
+    async def fetch_message(self, message_id):
+        return self._messages[message_id]
+
+    async def send(self, content):
+        message_id = max(self._messages.keys(), default=0) + 1
+        msg = FakeMessage(self.id, message_id)
+        msg.content = content
+        self._messages[message_id] = msg
+        self.sent.append(msg)
+        return msg
 
 
 def test_create_message_state_has_expected_shape():
@@ -74,3 +101,62 @@ def test_remember_weekly_report_message_updates_state_without_db():
 
     assert state["last_weekly_report_message"]["channel_id"] == 555
     assert state["last_weekly_report_message"]["message_id"] == 666
+
+
+def test_previous_day_placeholder_text_uses_clean_header_symbols():
+    text = build_previous_day_placeholder_text()
+    assert "✨" in text
+    assert "LEAGUE MOOD (PREVIOUS DAY)" in text
+
+
+def test_format_previous_day_report_text_rewrites_first_line_with_cycle_date():
+    text = format_previous_day_report_text("old header\nline2", "2026-02-24")
+    assert text.splitlines()[0] == "✨------ **LEAGUE MOOD (PREVIOUS DAY - 24.02.2026)** ------✨"
+
+
+def test_get_or_create_report_message_rollover_updates_previous_message():
+    async def scenario():
+        state = create_message_state()
+        state["last_report_message"].update({"channel_id": 10, "message_id": 2, "cycle_key": "2026-02-24"})
+        state["last_previous_report_message"].update({"channel_id": 10, "message_id": 1, "cycle_key": "2026-02-23"})
+
+        previous = FakeMessage(channel_id=10, message_id=1)
+        previous.content = "placeholder"
+        today = FakeMessage(channel_id=10, message_id=2)
+        today.content = "header today\nbody"
+        channel = FakeFetchChannel(10, {1: previous, 2: today})
+
+        class MoodService:
+            @staticmethod
+            def get_cycle_key():
+                return "2026-02-25"
+
+        seen_previous = {}
+
+        def remember_previous(message, cycle_key=None):
+            seen_previous["message_id"] = message.id
+            seen_previous["cycle_key"] = cycle_key
+
+        message = await get_or_create_report_message(
+            state=state,
+            channel=channel,
+            initial_content="init",
+            mood_service=MoodService(),
+            db_enabled=False,
+            db_get_state=lambda _k: None,
+            db_set_state=lambda _k, _v: None,
+            db_get_last_report_message=lambda: (0, 0),
+            db_set_last_report_message=lambda _c, _m: None,
+            remember_report_message_fn=lambda _m: None,
+            remember_previous_report_message_fn=remember_previous,
+        )
+
+        assert message.id == 2
+        assert seen_previous["message_id"] == 1
+        assert seen_previous["cycle_key"] == "2026-02-24"
+        assert previous.edits
+        assert "24.02.2026" in previous.content
+        assert state["last_report_message"]["cycle_key"] == "2026-02-25"
+
+    import asyncio
+    asyncio.run(scenario())
