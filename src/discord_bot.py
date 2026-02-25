@@ -413,7 +413,6 @@ async def background_match_cache_backfiller():
 
 
 async def background_daily_refresher():
-    LAST_REPORT_MESSAGE["last_cache_cleanup_at"] = REPORT_RUNTIME_STATE["last_cache_cleanup_at"]
     await runtime_background_daily_refresher(
         db_enabled=DB_ENABLED,
         daily_refresh_seconds=DAILY_REFRESH_SECONDS,
@@ -428,10 +427,10 @@ async def background_daily_refresher():
         match_cache_retention_days=MATCH_CACHE_RETENTION_DAYS,
         db_set_last_report_message=db_set_last_report_message,
         report_state=LAST_REPORT_MESSAGE,
+        runtime_state=REPORT_RUNTIME_STATE,
         worker_stats=WORKER_STATS,
         log=log,
     )
-    REPORT_RUNTIME_STATE["last_cache_cleanup_at"] = LAST_REPORT_MESSAGE.get("last_cache_cleanup_at", 0.0)
 
 
 @client.event

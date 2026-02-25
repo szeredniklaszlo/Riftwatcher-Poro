@@ -201,6 +201,7 @@ async def background_daily_refresher(
     match_cache_retention_days,
     db_set_last_report_message,
     report_state,
+    runtime_state,
     worker_stats,
     log,
 ):
@@ -267,9 +268,10 @@ async def background_daily_refresher(
             await push_snapshot_update(force=True)
             await edit_last_weekly_report_message(bypass_cache=True)
             now_mono = time.monotonic()
-            if (now_mono - report_state["last_cache_cleanup_at"]) >= max(3600, daily_refresh_seconds):
+            last_cleanup_at = runtime_state.get("last_cache_cleanup_at", 0.0)
+            if (now_mono - last_cleanup_at) >= max(3600, daily_refresh_seconds):
                 deleted = await asyncio.to_thread(db_cleanup_old_match_cache, match_cache_retention_days)
-                report_state["last_cache_cleanup_at"] = now_mono
+                runtime_state["last_cache_cleanup_at"] = now_mono
                 log(
                     f"[refresh] Match cache cleanup complete: deleted={deleted}, "
                     f"retention_days={match_cache_retention_days}"
