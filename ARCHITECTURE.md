@@ -118,6 +118,7 @@ All workers run continuously while connected, each with startup jitter and cycle
   - source of tracked Riot IDs and PUUID cache
 - `player_daily_stats`
   - per cycle/day wins/losses and aggregate performance stats
+  - includes expanded fields: assists, gold, wards, objective takedowns, multi-kills, and KP numerator/denominator
 - `match_info_cache`
   - cached Riot match payloads
 - `bot_state`
@@ -134,7 +135,7 @@ All workers run continuously while connected, each with startup jitter and cycle
 
 - `DAILY_REPORT_CHANNEL_ID`: daily scoreboard + `!Daily` command
 - `WEEKLY_REPORT_CHANNEL_ID`: weekly scoreboard + `!Weekly` command
-- `EVENTS_CHANNEL_ID`: ops/admin commands (`!help`, `!health`, `!score`, `!test`, `!riottest`, `!Add`, `!DebugPlayer`, `!tts`)
+- `EVENTS_CHANNEL_ID`: ops/admin commands (`!help`, `!health`, `!score`, `!test`, `!riottest`, `!Add`, `!remove`, `!DebugPlayer`, `!profile`, `!backfill`, `!tts`)
 - `MATCH_RECAP_CHANNEL_ID`: match recap posts, streak callouts, `!streak` and `!tts` commands
 
 All channels are required and no channel fallback chain is used.

@@ -1,11 +1,11 @@
-# Session Notes (2026-02-25)
+# Session Notes (2026-03-06)
 
 ## Current Snapshot
 
 - Branch: `main`
 - Runtime entrypoint: `python -m src.app`
 - DB mode: Postgres required (`DATABASE_URL`)
-- Test status: `115 passed` (`python -m pytest -q`)
+- Test status: `124 passed` (`python -m pytest -q`)
 
 ## Current Architecture
 
@@ -34,6 +34,11 @@
   - command allowed in `EVENTS_CHANNEL_ID` and `MATCH_RECAP_CHANNEL_ID`
 - `!streak` is enforced to recap channel routing (bare and with Riot ID arg).
 - `!profile Name#Tag` is available in `EVENTS_CHANNEL_ID`.
+- `!remove Name#Tag` is available in `EVENTS_CHANNEL_ID`.
+- `!backfill YYYY-MM-DD YYYY-MM-DD` is available in `EVENTS_CHANNEL_ID`:
+  - rebuilds historical `player_daily_stats` from `match_info_cache` only
+  - does not call Riot APIs
+  - max range per run is 366 days
 
 ## Reliability / Correctness Fixes Completed Recently
 
@@ -53,6 +58,11 @@
   - stricter Wilson confidence
   - weighted performance percentile
   - performance-weight ramp by game count
+- Expanded `player_daily_stats` data model and write/read flows:
+  - assists, gold, wards, objective takedowns
+  - multi-kills (double/triple/quadra/penta)
+  - kill participation numerator/denominator
+- Added one-shot historical cache backfill command (`!backfill`) for rebuilding old daily rows.
 
 ## CI/Deploy Notes
 
@@ -83,6 +93,8 @@
    - `!tts status` (events or recap channel)
    - `!streak Name#Tag` (recap channel)
    - `!profile Name#Tag` (events channel)
+   - `!remove Name#Tag` (events channel)
+   - `!backfill YYYY-MM-DD YYYY-MM-DD` (events channel)
 
 ## Docs Index
 

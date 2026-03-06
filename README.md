@@ -64,6 +64,11 @@ This project does not use Riot's official logos.
   - rank down: flame message
   - first-seen unranked -> ranked transitions are baseline only (no alert)
 - Daily performance badges are computed from ranked matches only.
+- Expanded daily stats now track:
+  - assists, gold earned, wards placed/killed
+  - turret/dragon/baron takedowns
+  - double/triple/quadra/penta kills
+  - kill participation numerator/denominator
 
 ## Background Workers
 
@@ -135,7 +140,7 @@ Optional (with defaults):
 - `LOG_RIOT_REQUESTS` (`false`)
 - `LOG_JSON` (`false`)
 - `RIOT_PLATFORM_ROUTING` (`euw1`)
-- `RIOT_REGIONAL_ROUTING` (`europe`) — regional host for account/match-v5 API calls (`europe`, `americas`, `asia`)
+- `RIOT_REGIONAL_ROUTING` (`europe`) - regional host for account/match-v5 API calls (`europe`, `americas`, `asia`)
 
 ## Data Tables
 
@@ -162,6 +167,7 @@ On Windows, if `python` resolves to a WindowsApps alias, run tests with an expli
 - If `MAX_TODAY_MATCH_DETAILS` is high, refresh cycles can become long on heavy accounts.
 - If Riot rate-limits (`429`), client retries with backoff.
 - Warning when recap and daily channel IDs are equal is informational only.
+- `!backfill` rebuilds from `match_info_cache` only and does not call Riot APIs.
 - See `OPERATIONS.md` for incident response, deploy rules, and health triage steps.
 
 ## Additional Documentation

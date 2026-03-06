@@ -1,6 +1,6 @@
 # Improvement Backlog
 
-This backlog tracks work not yet implemented as of 2026-02-25.
+This backlog tracks work not yet implemented as of 2026-03-06.
 
 ## Source docs reviewed
 
@@ -26,6 +26,12 @@ This backlog tracks work not yet implemented as of 2026-02-25.
 - Streak callouts moved to separate messages and TTS toggle added.
 - `!tts` routing allowed in events + recap channels.
 - `!profile Name#Tag` command implemented.
+- `!remove Name#Tag` command implemented.
+- `!backfill YYYY-MM-DD YYYY-MM-DD` command implemented (cache-only historical rebuild).
+- `player_daily_stats` expanded with additional performance fields:
+  - assists/gold/warding/objective takedowns
+  - multi-kill counters
+  - kill participation numerator/denominator
 - Command routing matrix tests added.
 - Recap/streak separation integration test coverage added.
 - GitLab test pipeline tightened for push + MR.

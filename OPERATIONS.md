@@ -32,6 +32,25 @@ Scope:
   - manual `!streak Name#Tag` callouts
 - Does not affect recap messages themselves.
 
+## Historical Stats Backfill
+
+Command:
+- `!backfill YYYY-MM-DD YYYY-MM-DD`
+
+Allowed channel:
+- `EVENTS_CHANNEL_ID`
+
+Behavior:
+- Rebuilds `player_daily_stats` rows from cached match payloads (`match_info_cache`) only.
+- Does not call Riot APIs.
+- Recomputes expanded stat fields (assists/gold/wards/objective takedowns/multi-kills/KP numerators+denominators).
+- Maximum range is 366 days per command run.
+
+Troubleshooting:
+1. If output shows high `Tracked players missing PUUID`, verify `tracked_players.puuid` is populated.
+2. If output shows low matches scanned, check cache retention settings and recent cache cleanup activity.
+3. If no rows updated, confirm requested date range overlaps cached match end times in the report timezone/day-start window.
+
 ## Recap vs Streak Message Separation
 
 Expected behavior:
