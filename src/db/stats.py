@@ -55,7 +55,8 @@ def db_upsert_daily_stats(day_date, riot_id, mode_records, performance_totals=No
         VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, NOW()
         )
         ON CONFLICT (day_date, riot_id)
         DO UPDATE SET
