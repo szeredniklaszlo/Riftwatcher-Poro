@@ -29,3 +29,22 @@ def db_get_puuid(riot_id):
 def db_load_tracked_players():
     rows = db_execute("SELECT riot_id FROM tracked_players ORDER BY riot_id;", fetch=True) or []
     return [row[0] for row in rows]
+
+
+def db_remove_player(riot_id):
+    riot_key = str(riot_id).strip().casefold()
+    db_execute("DELETE FROM tracked_players WHERE lower(riot_id) = %s;", (riot_key,))
+    db_execute("DELETE FROM player_daily_stats WHERE lower(riot_id) = %s;", (riot_key,))
+    db_execute("DELETE FROM player_ranked_state WHERE lower(riot_id) = %s;", (riot_key,))
+    db_execute(
+        """
+        DELETE FROM bot_state
+        WHERE state_key IN (%s, %s, %s, %s);
+        """,
+        (
+            f"last_seen_match_id::{riot_key}",
+            f"last_announced_match_id::{riot_key}",
+            f"last_announced_streak::{riot_key}",
+            f"backfill_offset::{riot_key}",
+        ),
+    )

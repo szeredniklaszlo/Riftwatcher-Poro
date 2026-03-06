@@ -33,3 +33,4 @@ class CommandHandlerContext:
     worker_stats: Any = None
     db_get_state: Any = None
     db_set_state: Any = None
+    db_remove_player: Any = None

@@ -93,6 +93,7 @@ All workers start with jitter to avoid bursty startup traffic and log cycle hear
 - `!streak Name#Tag`
 - `!tts on|off|status`
 - `!Add Name#Tag`
+- `!remove Name#Tag`
 - `!DebugPlayer Name#Tag`
 - `!health`
 - `!test`

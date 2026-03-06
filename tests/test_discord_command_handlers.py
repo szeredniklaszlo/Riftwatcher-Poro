@@ -211,6 +211,46 @@ def test_handle_add_command_happy_path_persists_and_invalidates_cache():
     assert "Added `Alpha#NA1` and saved to postgres." in channel.sent_messages[0].content
 
 
+def test_handle_remove_command_happy_path_removes_persists_and_invalidates_cache():
+    channel = FakeChannel(channel_id=999)
+    incoming = FakeIncomingMessage("!remove Alpha#NA1", channel)
+    mood_service = FakeMoodService(build_outputs=["unused"])
+    riot_client = FakeRiotClient()
+    friends = ["Alpha#NA1", "Bravo#NA1"]
+    removals = []
+
+    asyncio.run(
+        handle_incoming_message(
+            message=incoming,
+            channel_id=777,
+            friends=friends,
+            riot_client=riot_client,
+            mood_service=mood_service,
+            report_timezone_name="UTC",
+            report_day_start_hour=6,
+            db_enabled=True,
+            start_monotonic=0.0,
+            mood_request_lock=asyncio.Lock(),
+            request_id_context=contextvars.ContextVar("request_id", default=None),
+            create_request_id=lambda _prefix: "remove-1234",
+            get_or_create_report_message=lambda _channel, _initial_content: None,
+            remember_report_message=lambda _message: None,
+            normalize_riot_id=lambda riot_id: riot_id.strip(),
+            db_upsert_player=lambda _riot_id, _puuid: None,
+            db_remove_player=lambda riot_id: removals.append(riot_id),
+            log=lambda _msg: None,
+            weekly_report_channel_id=888,
+            events_channel_id=999,
+        )
+    )
+
+    assert friends == ["Bravo#NA1"]
+    assert removals == ["Alpha#NA1"]
+    assert mood_service.invalidated is True
+    assert len(channel.sent_messages) == 1
+    assert "Removed `Alpha#NA1` from tracked players." in channel.sent_messages[0].content
+
+
 def test_handle_week_command_updates_weekly_scoreboard_message():
     channel = FakeChannel(channel_id=888)
     incoming = FakeIncomingMessage("!Weekly", channel)

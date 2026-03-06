@@ -44,6 +44,8 @@ class FakeContext:
         ("!tts on", True),
         ("!add", True),
         ("!add alpha#na1", True),
+        ("!remove", True),
+        ("!remove alpha#na1", True),
         ("!debugplayer alpha#na1", True),
         ("!help", True),
         ("!unknown", False),
@@ -60,6 +62,7 @@ def test_command_channel_id_matrix_with_recap_channel():
     assert command_channel_id("!streak", daily_channel_id=101, weekly_channel_id=202, events_channel_id=303, match_recap_channel_id=404) == 404
     assert command_channel_id("!streak alpha#na1", daily_channel_id=101, weekly_channel_id=202, events_channel_id=303, match_recap_channel_id=404) == 404
     assert command_channel_id("!profile alpha#na1", daily_channel_id=101, weekly_channel_id=202, events_channel_id=303, match_recap_channel_id=404) == 303
+    assert command_channel_id("!remove alpha#na1", daily_channel_id=101, weekly_channel_id=202, events_channel_id=303, match_recap_channel_id=404) == 303
     assert command_channel_id("!tts", daily_channel_id=101, weekly_channel_id=202, events_channel_id=303, match_recap_channel_id=404) == (303, 404)
     assert command_channel_id("!tts off", daily_channel_id=101, weekly_channel_id=202, events_channel_id=303, match_recap_channel_id=404) == (303, 404)
     assert command_channel_id("!help", daily_channel_id=101, weekly_channel_id=202, events_channel_id=303, match_recap_channel_id=404) == 303

@@ -10,7 +10,7 @@ from src import config as cfg
 from src import db as dbm
 from src.discord_command_handlers import handle_incoming_message
 from src.discord_text import create_request_id
-from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, MOOD_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND, WEEK_COMMAND
+from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, MOOD_COMMAND, REMOVE_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND, WEEK_COMMAND
 from src.mood_service import MoodService
 from src.riot_api import RiotApiClient
 from src.runtime.alerts import RiotAlertState, trigger_riot_key_alert as runtime_trigger_riot_key_alert
@@ -94,6 +94,7 @@ db_get_state = dbm.db_get_state
 db_upsert_daily_stats = dbm.db_upsert_daily_stats
 db_upsert_match_info = dbm.db_upsert_match_info
 db_upsert_player = dbm.db_upsert_player
+db_remove_player = dbm.db_remove_player
 db_upsert_ranked_state = dbm.db_upsert_ranked_state
 init_db = dbm.init_db
 
@@ -458,6 +459,7 @@ async def on_ready():
         f"for Monday {REPORT_DAY_START_HOUR:02d}:00 -> next Monday {REPORT_DAY_START_HOUR:02d}:00."
     )
     log(f"[startup] Use {ADD_COMMAND} <Name#Tag> in channel {EVENTS_CHANNEL_ID} to add a player at runtime.")
+    log(f"[startup] Use {REMOVE_COMMAND} <Name#Tag> in channel {EVENTS_CHANNEL_ID} to remove a player at runtime.")
     log(f"[startup] Use {DEBUG_PLAYER_COMMAND} <Name#Tag> in channel {EVENTS_CHANNEL_ID} to inspect queue bucket mapping.")
     log(f"[startup] Use {HEALTH_COMMAND} in channel {EVENTS_CHANNEL_ID} for health status.")
     log(f"[startup] Loaded {len(FRIENDS)} tracked players from postgres.")
@@ -532,6 +534,7 @@ async def on_message(message):
         remember_weekly_report_message=remember_weekly_report_message,
         normalize_riot_id=normalize_riot_id,
         db_upsert_player=db_upsert_player,
+        db_remove_player=db_remove_player,
         log=log,
         weekly_report_channel_id=WEEKLY_REPORT_CHANNEL_ID,
         events_channel_id=EVENTS_CHANNEL_ID,

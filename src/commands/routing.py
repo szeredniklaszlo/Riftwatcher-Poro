@@ -5,6 +5,7 @@ from src.constants import (
     HELP_COMMAND,
     MOOD_COMMAND,
     PROFILE_COMMAND,
+    REMOVE_COMMAND,
     RIOT_TEST_COMMAND,
     SCORE_COMMAND,
     STREAK_COMMAND,
@@ -24,6 +25,7 @@ def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_
         f"- `{WEEK_COMMAND}`: Refresh weekly scoreboard for Monday `{report_day_start_hour:02d}:00` -> next Monday "
         f"`{report_day_start_hour:02d}:00` (run/post in {weekly_channel_ref}).\n"
         f"- `{ADD_COMMAND} Name#Tag`: Add a tracked Riot ID (run in {events_channel_ref}).\n"
+        f"- `{REMOVE_COMMAND} Name#Tag`: Remove a tracked Riot ID (run in {events_channel_ref}).\n"
         f"- `{DEBUG_PLAYER_COMMAND} Name#Tag`: Show queue/window debug details (run in {events_channel_ref}).\n"
         f"- `{HEALTH_COMMAND}`: Show bot/DB/cache health (run in {events_channel_ref}).\n"
         f"- `{SCORE_COMMAND}`: Show how each player's Gamer Score is calculated today (run in {events_channel_ref}).\n"
@@ -44,6 +46,7 @@ def is_supported_command(content_lower):
         WEEK_COMMAND.casefold(),
         STREAK_COMMAND.casefold(),
         ADD_COMMAND.casefold(),
+        REMOVE_COMMAND.casefold(),
         DEBUG_PLAYER_COMMAND.casefold(),
         HEALTH_COMMAND.casefold(),
         HELP_COMMAND.casefold(),
@@ -55,6 +58,7 @@ def is_supported_command(content_lower):
         return True
     return (
         content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
+        or content_lower.startswith(f"{REMOVE_COMMAND.casefold()} ")
         or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
         or content_lower.startswith(f"{PROFILE_COMMAND.casefold()} ")
         or content_lower.startswith(f"{STREAK_COMMAND.casefold()} ")
@@ -86,6 +90,7 @@ def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, ev
             TEST_COMMAND.casefold(),
             RIOT_TEST_COMMAND.casefold(),
             ADD_COMMAND.casefold(),
+            REMOVE_COMMAND.casefold(),
             DEBUG_PLAYER_COMMAND.casefold(),
             HEALTH_COMMAND.casefold(),
             HELP_COMMAND.casefold(),
@@ -94,6 +99,7 @@ def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, ev
             TTS_COMMAND.casefold(),
         }
         or content_lower.startswith(f"{ADD_COMMAND.casefold()} ")
+        or content_lower.startswith(f"{REMOVE_COMMAND.casefold()} ")
         or content_lower.startswith(f"{DEBUG_PLAYER_COMMAND.casefold()} ")
         or content_lower.startswith(f"{PROFILE_COMMAND.casefold()} ")
         or content_lower.startswith(f"{TTS_COMMAND.casefold()} ")

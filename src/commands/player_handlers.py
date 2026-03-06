@@ -2,7 +2,7 @@ import asyncio
 
 import requests
 
-from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, PROFILE_COMMAND, STREAK_COMMAND
+from src.constants import ADD_COMMAND, DEBUG_PLAYER_COMMAND, PROFILE_COMMAND, REMOVE_COMMAND, STREAK_COMMAND
 from src.discord_recap_worker import get_ranked_streak_info
 from src.discord_text import (
     format_streak_callout,
@@ -243,6 +243,10 @@ async def handle_player_commands(ctx):
         await ctx.message.channel.send(f"Usage: `{ADD_COMMAND} Name#Tag`")
         return True
 
+    if content_lower == REMOVE_COMMAND.casefold():
+        await ctx.message.channel.send(f"Usage: `{REMOVE_COMMAND} Name#Tag`")
+        return True
+
     if content_lower.startswith(f"{ADD_COMMAND.casefold()} "):
         raw_riot_id = content[len(ADD_COMMAND):].strip()
         try:
@@ -277,6 +281,37 @@ async def handle_player_commands(ctx):
         )
         ctx.mood_service.invalidate_report_cache()
         ctx.log(f"[add] Added player {riot_id}.")
+        return True
+
+    if content_lower.startswith(f"{REMOVE_COMMAND.casefold()} "):
+        raw_riot_id = content[len(REMOVE_COMMAND):].strip()
+        try:
+            riot_id = ctx.normalize_riot_id(raw_riot_id)
+        except ValueError as exc:
+            await ctx.message.channel.send(f"Remove failed: {exc}")
+            return True
+
+        if not any(existing.casefold() == riot_id.casefold() for existing in ctx.friends):
+            await ctx.message.channel.send(f"`{riot_id}` is not currently tracked.")
+            return True
+
+        status_message = await ctx.message.channel.send(f"\u23F3 Removing `{riot_id}` from tracked players...")
+        try:
+            if ctx.db_remove_player is not None:
+                await asyncio.to_thread(ctx.db_remove_player, riot_id)
+        except Exception as exc:
+            await status_message.edit(content=f"Remove failed for `{riot_id}`: {exc}")
+            return True
+
+        ctx.friends[:] = [existing for existing in ctx.friends if existing.casefold() != riot_id.casefold()]
+        ctx.mood_service.invalidate_report_cache()
+        await status_message.edit(
+            content=(
+                f"\u2705 Removed `{riot_id}` from tracked players. "
+                f"Total tracked players: {len(ctx.friends)}"
+            )
+        )
+        ctx.log(f"[remove] Removed player {riot_id}.")
         return True
 
     return False
