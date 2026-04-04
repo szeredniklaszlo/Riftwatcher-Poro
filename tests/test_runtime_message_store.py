@@ -27,13 +27,31 @@ class FakeMessage:
 
 
 class FakeFetchChannel(FakeChannel):
-    def __init__(self, channel_id, messages):
+    def __init__(self, channel_id, messages, fetch_exceptions=None):
         super().__init__(channel_id)
         self._messages = messages
         self.sent = []
+        self._fetch_exceptions = fetch_exceptions or {}
 
     async def fetch_message(self, message_id):
+        exc = self._fetch_exceptions.get(message_id)
+        if exc is not None:
+            raise exc
         return self._messages[message_id]
+
+    def get_partial_message(self, message_id):
+        channel = self
+        message = self._messages[message_id]
+
+        class PartialMessage:
+            def __init__(self):
+                self.channel = channel
+                self.id = message_id
+
+            async def edit(self, *, content):
+                await message.edit(content=content)
+
+        return PartialMessage()
 
     async def send(self, content):
         message_id = max(self._messages.keys(), default=0) + 1
@@ -157,6 +175,53 @@ def test_get_or_create_report_message_rollover_updates_previous_message():
         assert previous.edits
         assert "24.02.2026" in previous.content
         assert state["last_report_message"]["cycle_key"] == "2026-02-25"
+
+    import asyncio
+    asyncio.run(scenario())
+
+
+def test_get_or_create_report_message_keeps_today_id_on_fetch_http_exception():
+    async def scenario():
+        import discord
+        from types import SimpleNamespace
+
+        state = create_message_state()
+        state["last_report_message"].update({"channel_id": 10, "message_id": 2, "cycle_key": "2026-02-25"})
+        state["last_previous_report_message"].update({"channel_id": 10, "message_id": 1, "cycle_key": "2026-02-24"})
+
+        previous = FakeMessage(channel_id=10, message_id=1)
+        previous.content = "previous"
+        today = FakeMessage(channel_id=10, message_id=2)
+        today.content = "today"
+        http_error = discord.HTTPException(
+            SimpleNamespace(status=503, reason="Service Unavailable", headers={}),
+            "upstream timeout",
+        )
+        channel = FakeFetchChannel(10, {1: previous, 2: today}, fetch_exceptions={2: http_error})
+
+        class MoodService:
+            @staticmethod
+            def get_cycle_key():
+                return "2026-02-25"
+
+        message = await get_or_create_report_message(
+            state=state,
+            channel=channel,
+            initial_content="init",
+            mood_service=MoodService(),
+            db_enabled=False,
+            db_get_state=lambda _k: None,
+            db_set_state=lambda _k, _v: None,
+            db_get_last_report_message=lambda: (0, 0),
+            db_set_last_report_message=lambda _c, _m: None,
+            remember_report_message_fn=lambda _m: None,
+            remember_previous_report_message_fn=lambda _m, cycle_key=None: None,
+        )
+
+        assert message.id == 2
+        assert channel.sent == []
+        assert state["last_report_message"]["channel_id"] == 10
+        assert state["last_report_message"]["message_id"] == 2
 
     import asyncio
     asyncio.run(scenario())

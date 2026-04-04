@@ -10,6 +10,18 @@ PREVIOUS_REPORT_MESSAGE_STATE_KEY = "previous_report_message_id"
 PREVIOUS_REPORT_CYCLE_STATE_KEY = "previous_report_cycle_key"
 
 
+class TrackedMessageReference:
+    def __init__(self, *, channel, message_id, content_hint=""):
+        self.channel = channel
+        self.id = int(message_id)
+        self.content = str(content_hint or "")
+
+    async def edit(self, *, content):
+        partial = self.channel.get_partial_message(self.id)
+        await partial.edit(content=content)
+        self.content = content
+
+
 def create_message_state():
     return {
         "last_report_message": {"channel_id": None, "message_id": None, "cycle_key": None},
@@ -143,7 +155,7 @@ async def get_or_create_report_message(
     if previous_channel_id == channel.id and previous_message_id:
         try:
             previous_message = await channel.fetch_message(previous_message_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        except (discord.NotFound, discord.Forbidden):
             last_previous["channel_id"] = None
             last_previous["message_id"] = None
             last_previous["cycle_key"] = None
@@ -154,18 +166,28 @@ async def get_or_create_report_message(
                 await asyncio.to_thread(db_set_state, PREVIOUS_REPORT_CHANNEL_STATE_KEY, "0")
                 await asyncio.to_thread(db_set_state, PREVIOUS_REPORT_MESSAGE_STATE_KEY, "0")
                 await asyncio.to_thread(db_set_state, PREVIOUS_REPORT_CYCLE_STATE_KEY, "")
+        except discord.HTTPException:
+            previous_message = TrackedMessageReference(
+                channel=channel,
+                message_id=previous_message_id,
+            )
 
     today_message = None
     if channel_id == channel.id and message_id:
         try:
             today_message = await channel.fetch_message(message_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        except (discord.NotFound, discord.Forbidden):
             last_report["channel_id"] = None
             last_report["message_id"] = None
             channel_id = None
             message_id = None
             if db_enabled:
                 await asyncio.to_thread(db_set_last_report_message, 0, 0)
+        except discord.HTTPException:
+            today_message = TrackedMessageReference(
+                channel=channel,
+                message_id=message_id,
+            )
 
     # Migration path: if only one tracked daily message exists, convert it into
     # the previous-day slot and create a new today message below it.
@@ -231,11 +253,13 @@ async def get_or_create_weekly_report_message(
     if channel_id == channel.id and message_id:
         try:
             return await channel.fetch_message(message_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        except (discord.NotFound, discord.Forbidden):
             last_weekly["channel_id"] = None
             last_weekly["message_id"] = None
             if db_enabled:
                 await asyncio.to_thread(db_set_last_weekly_report_message, 0, 0)
+        except discord.HTTPException:
+            return TrackedMessageReference(channel=channel, message_id=message_id)
 
     message = await channel.send(initial_content)
     remember_weekly_report_message_fn(message)
