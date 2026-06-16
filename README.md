@@ -1,7 +1,17 @@
 # Riftwatcher Poro
 
+<p align="center">
+  <img src="assets/logo.png" width="200" alt="Riftwatcher Poro Logo">
+</p>
+
 Riftwatcher Poro is a Discord bot for tracking ranked League of Legends performance for a list of tracked Riot IDs.
 It maintains daily and weekly scoreboard messages, posts match recaps, and posts rank up/down alerts.
+
+## Screenshots
+
+| Daily Scoreboard | Match Recap |
+| :---: | :---: |
+| ![Daily Scoreboard](assets/screenshot_daily.png) | ![Match Recap](assets/screenshot_recap.png) |
 
 ## License
 
