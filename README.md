@@ -193,6 +193,12 @@ py -3.11 -m pytest -q
 - `!backfill` rebuilds from `match_info_cache` only and does not call Riot APIs.
 - See `OPERATIONS.md` for incident response, deploy rules, and health triage steps.
 
+## Support the Project
+
+If you find Riftwatcher Poro useful and would like to support its development, you can buy me a coffee!
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support%20My%20Work-orange?style=for-the-badge&logo=buy-me-a-coffee)](https://www.buymeacoffee.com/noxvain)
+
 ## Additional Documentation
 
 - `ARCHITECTURE.md` for module/runtime structure.
