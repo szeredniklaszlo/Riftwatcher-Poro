@@ -1,5 +1,6 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
+  "name": "Riftwatcher Poro",
   "deploy": {
     "startCommand": "python -m src.app",
     "restartPolicyType": "ALWAYS",

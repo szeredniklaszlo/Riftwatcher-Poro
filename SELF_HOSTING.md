@@ -1,8 +1,8 @@
-# Self-Hosting MoodBot
+# Self-Hosting Riftwatcher Poro
 
-MoodBot is designed to run as one bot instance per Discord server/community. Each self-hosted deployment uses its own Discord bot token, Riot API key, Postgres database, channel IDs, and tracked player list.
+Riftwatcher Poro is designed to run as one bot instance per Discord server/community. Each self-hosted deployment uses its own Discord bot token, Riot API key, Postgres database, channel IDs, and tracked player list.
 
-MoodBot is source-available for non-commercial use under the PolyForm Noncommercial License 1.0.0. Commercial use requires separate permission from the project maintainer.
+Riftwatcher Poro is source-available for non-commercial use under the PolyForm Noncommercial License 1.0.0. Commercial use requires separate permission from the project maintainer.
 
 ## Before You Start
 
@@ -13,7 +13,7 @@ MoodBot is source-available for non-commercial use under the PolyForm Noncommerc
 - A Postgres database
 - A hosting service for a long-running worker, such as Railway, Render, Fly.io, or a VPS
 
-MoodBot is not endorsed by Riot Games. Keep the Riot disclaimer from `README.md` visible if you publish your own fork or deployment instructions. Each operator must provide their own Riot API key and is responsible for complying with Riot Developer Portal policies.
+Riftwatcher Poro is not endorsed by Riot Games. Keep the Riot disclaimer from `README.md` visible if you publish your own fork or deployment instructions. Each operator must provide their own Riot API key and is responsible for complying with Riot Developer Portal policies.
 
 ## 1. Create The Discord Bot
 

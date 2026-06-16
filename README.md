@@ -1,17 +1,17 @@
-# MoodBot
+# Riftwatcher Poro
 
-MoodBot is a Discord bot for tracking ranked League of Legends performance for a list of tracked Riot IDs.
+Riftwatcher Poro is a Discord bot for tracking ranked League of Legends performance for a list of tracked Riot IDs.
 It maintains daily and weekly scoreboard messages, posts match recaps, and posts rank up/down alerts.
 
 ## License
 
-MoodBot is source-available for non-commercial use under the PolyForm Noncommercial License 1.0.0. See `LICENSE.md`.
+Riftwatcher Poro is source-available for non-commercial use under the PolyForm Noncommercial License 1.0.0. See `LICENSE.md`.
 
 Commercial use is not granted by this license. Contact the project maintainer for separate commercial permission.
 
 ## Disclaimer
 
-MoodBot is an independent community project and is not endorsed by, directly affiliated with, maintained, authorized, or sponsored by Riot Games.
+Riftwatcher Poro is an independent community project and is not endorsed by, directly affiliated with, maintained, authorized, or sponsored by Riot Games.
 Riot Games, League of Legends, and all associated properties are trademarks or registered trademarks of Riot Games, Inc.
 This project does not use Riot's official logos.
 
@@ -22,7 +22,7 @@ This project does not use Riot's official logos.
 
 ## Self-Hosting
 
-MoodBot is intended to be self-hosted as one bot instance per Discord server/community. Each deployment uses its own Discord bot token, Riot API key, Postgres database, channel IDs, and tracked player list.
+Riftwatcher Poro is intended to be self-hosted as one bot instance per Discord server/community. Each deployment uses its own Discord bot token, Riot API key, Postgres database, channel IDs, and tracked player list.
 
 Start with:
 

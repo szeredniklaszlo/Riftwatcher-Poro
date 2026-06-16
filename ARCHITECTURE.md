@@ -1,8 +1,8 @@
-# MoodBot Architecture
+# Riftwatcher Poro Architecture
 
 ## Purpose
 
-MoodBot is a Discord worker service that tracks ranked League results for tracked Riot IDs and maintains:
+Riftwatcher Poro is a Discord worker service that tracks ranked League results for tracked Riot IDs and maintains:
 
 - two daily scoreboard messages in the daily channel:
   - previous day snapshot message (top)
