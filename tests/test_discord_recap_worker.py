@@ -338,6 +338,8 @@ def test_process_recap_cycle_no_new_matches_skips_post_and_sync():
     async def edit_last_report_message(**kwargs):
         edit_calls.append(kwargs)
 
+    logs = []
+
     asyncio.run(
         process_recap_cycle(
             friends=["Alpha#NA1"],
@@ -351,7 +353,7 @@ def test_process_recap_cycle_no_new_matches_skips_post_and_sync():
             db_set_state=db_set_state,
             db_upsert_daily_stats=db_upsert_daily_stats,
             edit_last_report_message=edit_last_report_message,
-            log=lambda _msg: None,
+            log=logs.append,
         )
     )
 
@@ -359,6 +361,8 @@ def test_process_recap_cycle_no_new_matches_skips_post_and_sync():
     assert upserts == []
     assert mood.invalidated is False
     assert edit_calls == []
+    assert any("No new matches to post" in row for row in logs)
+    assert any("checked_players=1" in row for row in logs)
 
 
 def test_process_recap_cycle_skips_remake_notifications_and_sync():
@@ -393,6 +397,8 @@ def test_process_recap_cycle_skips_remake_notifications_and_sync():
     async def edit_last_report_message(**kwargs):
         edit_calls.append(kwargs)
 
+    logs = []
+
     asyncio.run(
         process_recap_cycle(
             friends=["Alpha#NA1"],
@@ -406,7 +412,7 @@ def test_process_recap_cycle_skips_remake_notifications_and_sync():
             db_set_state=db_set_state,
             db_upsert_daily_stats=lambda *_args, **_kwargs: upserts.append(True),
             edit_last_report_message=edit_last_report_message,
-            log=lambda _msg: None,
+            log=logs.append,
         )
     )
 
@@ -414,6 +420,8 @@ def test_process_recap_cycle_skips_remake_notifications_and_sync():
     assert state[_state_key("Alpha#NA1")] == "EUW1_2"
     assert upserts == []
     assert edit_calls == []
+    assert any("Match scan summary" in row for row in logs)
+    assert any("skipped_remakes=1" in row for row in logs)
 
 
 def test_process_recap_cycle_batches_multiple_matches_into_single_post():

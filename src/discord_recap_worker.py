@@ -98,8 +98,13 @@ async def process_recap_cycle(
     matches_to_report = set()
     pending_latest_match_id_by_riot = {}
     pending_new_match_ids_by_riot = {}
+    checked_players = 0
+    players_with_recent_ids = 0
+    initialized_players = 0
+    players_with_new_ids = 0
     for riot_id in friends:
         try:
+            checked_players += 1
             puuid = await riot_client.fetch_puuid(riot_id)
             puuid_by_riot_id[riot_id] = puuid
             recent_ids = await riot_client.fetch_recent_match_ids(puuid, count=20, riot_id=riot_id)
@@ -107,11 +112,13 @@ async def process_recap_cycle(
             if not recent_ids:
                 continue
 
+            players_with_recent_ids += 1
             state_key = match_recap_state_key(riot_id)
             last_announced = await asyncio.to_thread(db_get_state, state_key)
             latest_match_id = recent_ids[0]
             if not last_announced:
                 await asyncio.to_thread(db_set_state, state_key, latest_match_id)
+                initialized_players += 1
                 continue
 
             new_match_ids = mood_service.get_new_match_ids(recent_ids, last_announced)
@@ -119,15 +126,23 @@ async def process_recap_cycle(
                 matches_to_report.update(new_match_ids)
                 pending_latest_match_id_by_riot[riot_id] = latest_match_id
                 pending_new_match_ids_by_riot[riot_id] = set(new_match_ids)
+                players_with_new_ids += 1
         except requests.RequestException as exc:
             log(f"[recap] Failed while checking {riot_id}: {exc}")
 
     if not matches_to_report:
+        log(
+            "[recap] No new matches to post: "
+            f"checked_players={checked_players} players_with_recent_ids={players_with_recent_ids} "
+            f"initialized_players={initialized_players} players_with_new_ids={players_with_new_ids}."
+        )
         return
 
     puuid_to_riot_id = {puuid: riot_id for riot_id, puuid in puuid_by_riot_id.items()}
     match_entries = []
     failed_match_ids = set()
+    skipped_no_tracked_participants = 0
+    skipped_remakes = 0
     for match_id in matches_to_report:
         try:
             match_info = await riot_client.fetch_match_info(match_id)
@@ -143,14 +158,23 @@ async def process_recap_cycle(
             if riot_id:
                 tracked_participants.append((riot_id, participant))
         if not tracked_participants:
+            skipped_no_tracked_participants += 1
             continue
 
         end_ts = get_match_end_unix_seconds(match_info)
         queue_id = int(match_info.get("info", {}).get("queueId", -1))
         if is_remake_match(match_info):
+            skipped_remakes += 1
             continue
         duration_seconds = get_match_duration_seconds(match_info)
         match_entries.append((end_ts, match_id, queue_id, duration_seconds, tracked_participants))
+
+    log(
+        "[recap] Match scan summary: "
+        f"candidate_matches={len(matches_to_report)} prepared_matches={len(match_entries)} "
+        f"failed_fetches={len(failed_match_ids)} skipped_no_tracked={skipped_no_tracked_participants} "
+        f"skipped_remakes={skipped_remakes}."
+    )
 
     match_entries.sort(key=lambda row: row[0])
     recap_sections = []
