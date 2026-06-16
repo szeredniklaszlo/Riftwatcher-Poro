@@ -35,7 +35,7 @@ async def handle_ops_commands(ctx):
         return True
 
     if content_lower == TEST_COMMAND.casefold():
-        await ctx.message.channel.send("API test: MoodBot is online and can send messages.")
+        await ctx.message.channel.send("API test: Riftwatcher Poro is online and can send messages.")
         ctx.log(f"[test] Sent API test message in channel {ctx.message.channel.id}.")
         return True
 
@@ -57,7 +57,7 @@ async def handle_ops_commands(ctx):
         return True
 
     if content_lower == HEALTH_COMMAND.casefold():
-        stats = await ctx.mood_service.run_health_check(ctx.start_monotonic, worker_stats=ctx.worker_stats)
+        stats = await ctx.poro_service.run_health_check(ctx.start_monotonic, worker_stats=ctx.worker_stats)
         uptime = str(timedelta(seconds=stats["uptime_seconds"]))
         top_backfill_offsets = ", ".join(stats.get("top_backfill_offsets", [])) or "none"
         wstats = stats.get("worker_stats") or {}
@@ -102,7 +102,7 @@ async def handle_ops_commands(ctx):
         return True
 
     if content_lower == SCORE_COMMAND.casefold():
-        report = await ctx.mood_service.build_score_breakdown_report()
+        report = await ctx.poro_service.build_score_breakdown_report()
         await ctx.message.channel.send(report)
         ctx.log("[score] Sent score breakdown.")
         return True
@@ -145,7 +145,7 @@ async def handle_ops_commands(ctx):
             f"\u23F3 Backfilling cached match stats for `{start_day.isoformat()}` -> `{end_day.isoformat()}`..."
         )
         try:
-            result = await ctx.mood_service.backfill_daily_stats_from_cache(start_day, end_day, max_payloads=0)
+            result = await ctx.poro_service.backfill_daily_stats_from_cache(start_day, end_day, max_payloads=0)
             if result.get("error"):
                 await status_message.edit(content=f"Backfill failed: {result['error']}")
                 return True

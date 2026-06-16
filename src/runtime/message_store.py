@@ -75,7 +75,7 @@ def remember_weekly_report_message(*, state, message, db_enabled, db_set_last_we
 
 def build_previous_day_placeholder_text():
     return (
-        "\u2728------ **LEAGUE MOOD (PREVIOUS DAY)** ------\u2728\n\n"
+        "\u2728------ **RIFTWATCHER PORO (PREVIOUS DAY)** ------\u2728\n\n"
         "No previous-day snapshot available yet.\n\n"
         "\u2728--------------------------------------------\u2728"
     )
@@ -92,7 +92,7 @@ def format_previous_day_report_text(report_text, cycle_key):
     lines = str(report_text or "").splitlines()
     if not lines:
         return build_previous_day_placeholder_text()
-    lines[0] = f"\u2728------ **LEAGUE MOOD ({title})** ------\u2728"
+    lines[0] = f"\u2728------ **RIFTWATCHER PORO ({title})** ------\u2728"
     return "\n".join(lines)
 
 
@@ -101,7 +101,7 @@ async def get_or_create_report_message(
     state,
     channel,
     initial_content,
-    mood_service,
+    poro_service,
     db_enabled,
     db_get_state,
     db_set_state,
@@ -112,7 +112,7 @@ async def get_or_create_report_message(
 ):
     last_report = state["last_report_message"]
     last_previous = state["last_previous_report_message"]
-    current_cycle_key = mood_service.get_cycle_key()
+    current_cycle_key = poro_service.get_cycle_key()
     last_cycle_key = last_report.get("cycle_key")
     previous_channel_id = last_previous.get("channel_id")
     previous_message_id = last_previous.get("message_id")

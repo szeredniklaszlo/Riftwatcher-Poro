@@ -4,7 +4,7 @@ from src.constants import (
     DEBUG_PLAYER_COMMAND,
     HEALTH_COMMAND,
     HELP_COMMAND,
-    MOOD_COMMAND,
+    DAILY_COMMAND,
     PROFILE_COMMAND,
     REMOVE_COMMAND,
     RIOT_TEST_COMMAND,
@@ -21,8 +21,8 @@ def format_help_text(*, report_day_start_hour, daily_channel_id, weekly_channel_
     weekly_channel_ref = f"<#{weekly_channel_id}>" if weekly_channel_id else daily_channel_ref
     events_channel_ref = f"<#{events_channel_id}>"
     return (
-        "**MoodBot commands**\n"
-        f"- `{MOOD_COMMAND}`: Refresh daily scoreboard (run in {daily_channel_ref}).\n"
+        "**Riftwatcher Poro commands**\n"
+        f"- `{DAILY_COMMAND}`: Refresh daily scoreboard (run in {daily_channel_ref}).\n"
         f"- `{WEEK_COMMAND}`: Refresh weekly scoreboard for Monday `{report_day_start_hour:02d}:00` -> next Monday "
         f"`{report_day_start_hour:02d}:00` (run/post in {weekly_channel_ref}).\n"
         f"- `{ADD_COMMAND} Name#Tag`: Add a tracked Riot ID (run in {events_channel_ref}).\n"
@@ -44,7 +44,7 @@ def is_supported_command(content_lower):
     known_exact = {
         TEST_COMMAND.casefold(),
         RIOT_TEST_COMMAND.casefold(),
-        MOOD_COMMAND.casefold(),
+        DAILY_COMMAND.casefold(),
         WEEK_COMMAND.casefold(),
         STREAK_COMMAND.casefold(),
         ADD_COMMAND.casefold(),
@@ -71,7 +71,7 @@ def is_supported_command(content_lower):
 
 
 def command_channel_id(content_lower, *, daily_channel_id, weekly_channel_id, events_channel_id, match_recap_channel_id=None):
-    if content_lower == MOOD_COMMAND.casefold():
+    if content_lower == DAILY_COMMAND.casefold():
         return daily_channel_id
     if content_lower == WEEK_COMMAND.casefold():
         return weekly_channel_id

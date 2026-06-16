@@ -86,7 +86,7 @@ def test_background_daily_refresher_updates_runtime_cleanup_state(monkeypatch):
     class FakeChannel:
         id = 123
 
-    class FakeMoodService:
+    class FakePoroService:
         async def build_today_win_rate_report(self, prefer_snapshot=False, bypass_cache=False):
             _ = (prefer_snapshot, bypass_cache)
             return "snapshot"
@@ -130,7 +130,7 @@ def test_background_daily_refresher_updates_runtime_cleanup_state(monkeypatch):
             daily_refresh_seconds=30,
             client=client,
             request_id_context=__import__("contextvars").ContextVar("request_id", default=None),
-            mood_service=FakeMoodService(),
+            poro_service=FakePoroService(),
             resolve_channel=fake_resolve_channel,
             daily_report_channel_id=123,
             get_or_create_report_message=fake_get_or_create_report_message,

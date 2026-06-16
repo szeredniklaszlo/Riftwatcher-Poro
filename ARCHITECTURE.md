@@ -26,7 +26,7 @@ Riftwatcher Poro is a Discord worker service that tracks ranked League results f
   - command context, routing/channel policy, and split handlers (`ops`, `player`, `report`)
 - `src/discord_text.py`
   - pure text helpers (request id formatters, recap text helpers, report signatures)
-- `src/mood_service.py`
+- `src/poro_service.py`
   - service facade for report generation/cache policy
   - delegates refresh/report internals to `src/services/`
 - `src/services/`

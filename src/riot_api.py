@@ -455,7 +455,7 @@ class RiotApiClient:
         for match_id in match_ids:
             if detail_fetch_limit > 0 and today_details_fetched >= detail_fetch_limit:
                 self.log(
-                    f"[mood] {riot_id}: reached MAX_TODAY_MATCH_DETAILS={self.max_today_match_details}, "
+                    f"[poro] {riot_id}: reached MAX_TODAY_MATCH_DETAILS={self.max_today_match_details}, "
                     "stopping further today match processing."
                 )
                 break
@@ -495,7 +495,7 @@ class RiotApiClient:
         wins, losses = get_mode_totals(mode_records)
         elapsed_ms = int((time.perf_counter() - player_start) * 1000)
         self.log(
-            f"[mood] {riot_id}: matches={len(match_ids)} total={wins}W-{losses}L "
+            f"[poro] {riot_id}: matches={len(match_ids)} total={wins}W-{losses}L "
             f"solo={mode_records['solo_duo']['wins']}W-{mode_records['solo_duo']['losses']}L "
             f"flex={mode_records['flex']['wins']}W-{mode_records['flex']['losses']}L "
             f"elapsed={elapsed_ms}ms"

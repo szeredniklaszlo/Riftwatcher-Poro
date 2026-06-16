@@ -13,12 +13,12 @@ class CommandHandlerContext:
     match_recap_channel_id: int | None
     friends: list[str]
     riot_client: Any
-    mood_service: Any
+    poro_service: Any
     report_timezone_name: str
     report_day_start_hour: int
     db_enabled: bool
     start_monotonic: float
-    mood_request_lock: Any
+    daily_request_lock: Any
     request_id_context: Any
     create_request_id: Any
     get_or_create_report_message: Any

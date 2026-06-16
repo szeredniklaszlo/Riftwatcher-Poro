@@ -157,16 +157,16 @@ async def handle_player_commands(ctx):
             today_row = None
             weekly_row = None
             if ctx.db_enabled:
-                cycle_key = ctx.mood_service.get_cycle_key()
-                today_rows = await asyncio.to_thread(ctx.mood_service.db_load_latest_stats, cycle_key)
+                cycle_key = ctx.poro_service.get_cycle_key()
+                today_rows = await asyncio.to_thread(ctx.poro_service.db_load_latest_stats, cycle_key)
                 for row in today_rows:
                     if str(row.get("riot_id", "")).casefold() == riot_id.casefold():
                         today_row = row
                         break
 
-                week_start, week_end_exclusive = ctx.mood_service.get_week_window()
+                week_start, week_end_exclusive = ctx.poro_service.get_week_window()
                 weekly_rows = await asyncio.to_thread(
-                    ctx.mood_service.db_load_weekly_stats,
+                    ctx.poro_service.db_load_weekly_stats,
                     week_start.isoformat(),
                     week_end_exclusive.isoformat(),
                 )
@@ -199,12 +199,12 @@ async def handle_player_commands(ctx):
             primary_role = str((today_row or {}).get("primary_role", "") or "").upper() or None
             if primary_role is None:
                 primary_role = derive_primary_role(today_perf)
-            if hasattr(ctx.mood_service, "_ensure_role_baselines"):
+            if hasattr(ctx.poro_service, "_ensure_role_baselines"):
                 try:
-                    await ctx.mood_service._ensure_role_baselines()
+                    await ctx.poro_service._ensure_role_baselines()
                 except Exception:
                     pass
-            baselines = getattr(ctx.mood_service, "_role_baselines", None)
+            baselines = getattr(ctx.poro_service, "_role_baselines", None)
             gamer_score = compute_gamer_score(today_wins, today_losses, today_perf, primary_role, baselines)
 
             minutes = float(today_perf.get("minutes_total", 0.0) or 0.0)
@@ -305,7 +305,7 @@ async def handle_player_commands(ctx):
                 f"Total tracked players: {len(ctx.friends)}"
             )
         )
-        ctx.mood_service.invalidate_report_cache()
+        ctx.poro_service.invalidate_report_cache()
         ctx.log(f"[add] Added player {riot_id}.")
         return True
 
@@ -330,7 +330,7 @@ async def handle_player_commands(ctx):
             return True
 
         ctx.friends[:] = [existing for existing in ctx.friends if existing.casefold() != riot_id.casefold()]
-        ctx.mood_service.invalidate_report_cache()
+        ctx.poro_service.invalidate_report_cache()
         await status_message.edit(
             content=(
                 f"\u2705 Removed `{riot_id}` from tracked players. "

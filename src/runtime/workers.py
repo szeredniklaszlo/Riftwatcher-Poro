@@ -105,7 +105,7 @@ async def background_match_recap_notifier(
     request_id_context,
     friends,
     riot_client,
-    mood_service,
+    poro_service,
     report_timezone,
     match_recap_channel_id,
     db_enabled,
@@ -136,7 +136,7 @@ async def background_match_recap_notifier(
             await process_recap_cycle(
                 friends=friends,
                 riot_client=riot_client,
-                mood_service=mood_service,
+                poro_service=poro_service,
                 report_timezone=report_timezone,
                 match_recap_channel_id=match_recap_channel_id,
                 channel=channel,
@@ -226,7 +226,7 @@ async def background_daily_refresher(
     daily_refresh_seconds,
     client,
     request_id_context,
-    mood_service,
+    poro_service,
     resolve_channel,
     daily_report_channel_id,
     get_or_create_report_message,
@@ -260,7 +260,7 @@ async def background_daily_refresher(
                 now_mono = time.monotonic()
 
                 try:
-                    snapshot_text = await mood_service.build_today_win_rate_report(
+                    snapshot_text = await poro_service.build_today_win_rate_report(
                         prefer_snapshot=True,
                         bypass_cache=True,
                     )
@@ -299,7 +299,7 @@ async def background_daily_refresher(
             async def on_player_refreshed(_processed, _total, _riot_id):
                 await push_snapshot_update(force=False)
 
-            await mood_service.refresh_daily_stats_once(progress_callback=on_player_refreshed)
+            await poro_service.refresh_daily_stats_once(progress_callback=on_player_refreshed)
             await push_snapshot_update(force=True)
             await edit_last_weekly_report_message(bypass_cache=True)
             now_mono = time.monotonic()

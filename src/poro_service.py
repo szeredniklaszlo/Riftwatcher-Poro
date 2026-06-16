@@ -35,7 +35,7 @@ from src.services.report_builder import (
 )
 
 
-class MoodService:
+class PoroService:
     BASELINE_TTL_SECONDS = 12 * 3600
 
     LEADERBOARD_BADGES = SERVICE_LEADERBOARD_BADGES
@@ -180,7 +180,7 @@ class MoodService:
             and self.report_cache["day"] == cycle_key
             and now_monotonic < self.report_cache["expires_at"]
         ):
-            self.log("[mood] Returning cached report.")
+            self.log("[poro] Returning cached report.")
             return self.report_cache["text"]
 
         await self._ensure_role_baselines()
@@ -208,13 +208,13 @@ class MoodService:
                         snapshot_stale = snapshot_age > timedelta(seconds=snapshot_max_age_seconds)
 
                     if snapshot_stale:
-                        self.log("[mood] Snapshot data is stale; falling back to live rebuild.")
+                        self.log("[poro] Snapshot data is stale; falling back to live rebuild.")
                         stored_rows = []
 
             if stored_rows:
                 ranked_results = self.rows_to_ranked_results(stored_rows, self.friends, baselines=self._role_baselines)
                 if ranked_results or prefer_snapshot:
-                    self.log("[mood] Returning report from postgres daily stats.")
+                    self.log("[poro] Returning report from postgres daily stats.")
                     report_text = self.format_report_from_results(ranked_results, error_results, report_start)
                     if not bypass_cache:
                         self.report_cache["text"] = report_text
@@ -236,12 +236,12 @@ class MoodService:
         ordered_players = await self.get_players_ordered_by_oldest_stats(cycle_key)
         for riot_id in ordered_players:
             lol_name = get_lol_name(riot_id)
-            self.log(f"[mood] Processing player {lol_name} ({riot_id})")
+            self.log(f"[poro] Processing player {lol_name} ({riot_id})")
             try:
                 mode_records, performance_totals = await self.riot_client.get_today_mode_records(riot_id)
             except requests.RequestException as exc:
                 error_results.append((lol_name, self.simplify_riot_error(exc)))
-                self.log(f"[mood] Player failed {lol_name}: {exc}")
+                self.log(f"[poro] Player failed {lol_name}: {exc}")
                 processed_players += 1
                 if progress_callback is not None:
                     await progress_callback(processed_players, total_players, lol_name)
@@ -291,7 +291,7 @@ class MoodService:
             and self.weekly_report_cache["window"] == window_key
             and now_monotonic < self.weekly_report_cache["expires_at"]
         ):
-            self.log("[mood] Returning cached weekly report.")
+            self.log("[poro] Returning cached weekly report.")
             return self.weekly_report_cache["text"]
 
         report_start = time.perf_counter()

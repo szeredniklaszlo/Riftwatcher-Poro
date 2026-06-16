@@ -46,7 +46,7 @@ class FakeIncomingMessage:
         self.deleted = True
 
 
-class FakeMoodService:
+class FakePoroService:
     def __init__(self, build_outputs):
         self._build_outputs = list(build_outputs)
         self.refresh_recent_calls = []
@@ -139,7 +139,7 @@ def test_handle_mood_command_updates_scoreboard_from_snapshot_then_refresh():
     channel = FakeChannel(channel_id=777)
     incoming = FakeIncomingMessage("!Daily", channel)
     status_message = FakeStatusMessage(content="old content")
-    mood_service = FakeMoodService(build_outputs=["snapshot report", "fresh report"])
+    poro_service = FakePoroService(build_outputs=["snapshot report", "fresh report"])
     riot_client = FakeRiotClient()
     remembered = []
     logs = []
@@ -156,12 +156,12 @@ def test_handle_mood_command_updates_scoreboard_from_snapshot_then_refresh():
             channel_id=777,
             friends=["Alpha#NA1"],
             riot_client=riot_client,
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=6,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "mood-1234",
             get_or_create_report_message=get_or_create_report_message,
@@ -176,7 +176,7 @@ def test_handle_mood_command_updates_scoreboard_from_snapshot_then_refresh():
 
     assert incoming.deleted is True
     assert remembered == [status_message]
-    assert mood_service.refresh_recent_calls == [20]
+    assert poro_service.refresh_recent_calls == [20]
     assert status_message.edits[0].startswith("\u23F3 Gathering match results since 06:00")
     assert status_message.edits[1].endswith("_Refreshing latest matches..._")
     assert status_message.content == "fresh report"
@@ -185,7 +185,7 @@ def test_handle_mood_command_updates_scoreboard_from_snapshot_then_refresh():
 def test_handle_add_command_happy_path_persists_and_invalidates_cache():
     channel = FakeChannel(channel_id=999)
     incoming = FakeIncomingMessage("!Add Alpha#NA1", channel)
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
     riot_client = FakeRiotClient()
     friends = []
     upserts = []
@@ -196,12 +196,12 @@ def test_handle_add_command_happy_path_persists_and_invalidates_cache():
             channel_id=777,
             friends=friends,
             riot_client=riot_client,
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=6,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "add-1234",
             get_or_create_report_message=lambda _channel, _initial_content: None,
@@ -217,7 +217,7 @@ def test_handle_add_command_happy_path_persists_and_invalidates_cache():
     assert riot_client.fetch_puuid_calls == ["Alpha#NA1"]
     assert friends == ["Alpha#NA1"]
     assert upserts == [("Alpha#NA1", None)]
-    assert mood_service.invalidated is True
+    assert poro_service.invalidated is True
     assert len(channel.sent_messages) == 1
     assert "Added `Alpha#NA1` and saved to postgres." in channel.sent_messages[0].content
 
@@ -225,7 +225,7 @@ def test_handle_add_command_happy_path_persists_and_invalidates_cache():
 def test_handle_remove_command_happy_path_removes_persists_and_invalidates_cache():
     channel = FakeChannel(channel_id=999)
     incoming = FakeIncomingMessage("!remove Alpha#NA1", channel)
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
     riot_client = FakeRiotClient()
     friends = ["Alpha#NA1", "Bravo#NA1"]
     removals = []
@@ -236,12 +236,12 @@ def test_handle_remove_command_happy_path_removes_persists_and_invalidates_cache
             channel_id=777,
             friends=friends,
             riot_client=riot_client,
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=6,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "remove-1234",
             get_or_create_report_message=lambda _channel, _initial_content: None,
@@ -257,7 +257,7 @@ def test_handle_remove_command_happy_path_removes_persists_and_invalidates_cache
 
     assert friends == ["Bravo#NA1"]
     assert removals == ["Alpha#NA1"]
-    assert mood_service.invalidated is True
+    assert poro_service.invalidated is True
     assert len(channel.sent_messages) == 1
     assert "Removed `Alpha#NA1` from tracked players." in channel.sent_messages[0].content
 
@@ -266,7 +266,7 @@ def test_handle_week_command_updates_weekly_scoreboard_message():
     channel = FakeChannel(channel_id=888)
     incoming = FakeIncomingMessage("!Weekly", channel)
     status_message = FakeStatusMessage(content="old weekly")
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
     riot_client = FakeRiotClient()
     remembered = []
 
@@ -282,12 +282,12 @@ def test_handle_week_command_updates_weekly_scoreboard_message():
             channel_id=777,
             friends=["Alpha#NA1"],
             riot_client=riot_client,
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=6,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "week-1234",
             get_or_create_report_message=lambda _channel, _initial_content: None,
@@ -310,7 +310,7 @@ def test_handle_week_command_updates_weekly_scoreboard_message():
 def test_handle_help_command_shows_usage_and_channels():
     channel = FakeChannel(channel_id=999)
     incoming = FakeIncomingMessage("!help", channel)
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
     riot_client = FakeRiotClient()
 
     asyncio.run(
@@ -319,12 +319,12 @@ def test_handle_help_command_shows_usage_and_channels():
             channel_id=777,
             friends=["Alpha#NA1"],
             riot_client=riot_client,
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=9,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "help-1234",
             get_or_create_report_message=lambda _channel, _initial_content: None,
@@ -349,7 +349,7 @@ def test_handle_help_command_shows_usage_and_channels():
 def test_known_command_in_wrong_channel_prompts_to_use_daily_channel():
     channel = FakeChannel(channel_id=999)
     incoming = FakeIncomingMessage("!Daily", channel)
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
     riot_client = FakeRiotClient()
 
     asyncio.run(
@@ -358,12 +358,12 @@ def test_known_command_in_wrong_channel_prompts_to_use_daily_channel():
             channel_id=777,
             friends=["Alpha#NA1"],
             riot_client=riot_client,
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=6,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "wrong-1234",
             get_or_create_report_message=lambda _channel, _initial_content: None,
@@ -384,7 +384,7 @@ def test_handle_week_command_loading_text_uses_configured_hour():
     channel = FakeChannel(channel_id=888)
     incoming = FakeIncomingMessage("!Weekly", channel)
     status_message = FakeStatusMessage(content="old weekly")
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
     riot_client = FakeRiotClient()
 
     async def get_or_create_weekly_report_message(_channel, _initial_content):
@@ -396,12 +396,12 @@ def test_handle_week_command_loading_text_uses_configured_hour():
             channel_id=777,
             friends=["Alpha#NA1"],
             riot_client=riot_client,
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=9,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "week-1234",
             get_or_create_report_message=lambda _channel, _initial_content: None,
@@ -433,12 +433,12 @@ def _base_streak_kwargs(channel, friends=None):
     return dict(
         channel_id=777,
         friends=friends or ["Alpha#NA1"],
-        mood_service=FakeMoodService(build_outputs=["unused"]),
+        poro_service=FakePoroService(build_outputs=["unused"]),
         report_timezone_name="UTC",
         report_day_start_hour=6,
         db_enabled=True,
         start_monotonic=0.0,
-        mood_request_lock=asyncio.Lock(),
+        daily_request_lock=asyncio.Lock(),
         request_id_context=contextvars.ContextVar("request_id", default=None),
         create_request_id=lambda _prefix: "streak-1234",
         get_or_create_report_message=lambda _ch, _ic: None,
@@ -644,7 +644,7 @@ def test_tts_command_wrong_channel_prompts_events_or_recap():
 def test_health_command_includes_backfill_status():
     channel = FakeChannel(channel_id=999)
     incoming = FakeIncomingMessage("!health", channel)
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
     riot_client = FakeRiotClient()
 
     asyncio.run(
@@ -653,12 +653,12 @@ def test_health_command_includes_backfill_status():
             channel_id=777,
             friends=["Alpha#NA1"],
             riot_client=riot_client,
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=9,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "health-1234",
             get_or_create_report_message=lambda _channel, _initial_content: None,
@@ -681,7 +681,7 @@ def test_health_command_includes_backfill_status():
 def test_health_command_includes_worker_latency_metrics_when_available():
     channel = FakeChannel(channel_id=999)
     incoming = FakeIncomingMessage("!health", channel)
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
     riot_client = FakeRiotClient()
     worker_stats = {
         "refresh": {
@@ -701,12 +701,12 @@ def test_health_command_includes_worker_latency_metrics_when_available():
             channel_id=777,
             friends=["Alpha#NA1"],
             riot_client=riot_client,
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=9,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "health-5678",
             get_or_create_report_message=lambda _channel, _initial_content: None,
@@ -729,7 +729,7 @@ def test_health_command_includes_worker_latency_metrics_when_available():
 def test_backfill_command_runs_cache_backfill_and_reports_summary():
     channel = FakeChannel(channel_id=999)
     incoming = FakeIncomingMessage("!backfill 2026-01-01 2026-01-31", channel)
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
 
     asyncio.run(
         handle_incoming_message(
@@ -737,12 +737,12 @@ def test_backfill_command_runs_cache_backfill_and_reports_summary():
             channel_id=777,
             friends=["Alpha#NA1"],
             riot_client=FakeRiotClient(),
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=9,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "backfill-1234",
             get_or_create_report_message=lambda _channel, _initial_content: None,
@@ -755,7 +755,7 @@ def test_backfill_command_runs_cache_backfill_and_reports_summary():
         )
     )
 
-    assert len(mood_service.backfill_calls) == 1
+    assert len(poro_service.backfill_calls) == 1
     assert len(channel.sent_messages) == 1
     text = channel.sent_messages[0].content
     assert "Backfill complete" in text
@@ -765,7 +765,7 @@ def test_backfill_command_runs_cache_backfill_and_reports_summary():
 def test_backfill_command_rejects_invalid_date_format():
     channel = FakeChannel(channel_id=999)
     incoming = FakeIncomingMessage("!backfill 2026-01-XX 2026-01-31", channel)
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
 
     asyncio.run(
         handle_incoming_message(
@@ -773,12 +773,12 @@ def test_backfill_command_rejects_invalid_date_format():
             channel_id=777,
             friends=["Alpha#NA1"],
             riot_client=FakeRiotClient(),
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=9,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "backfill-5678",
             get_or_create_report_message=lambda _channel, _initial_content: None,
@@ -791,7 +791,7 @@ def test_backfill_command_rejects_invalid_date_format():
         )
     )
 
-    assert mood_service.backfill_calls == []
+    assert poro_service.backfill_calls == []
     assert len(channel.sent_messages) == 1
     assert "invalid date format" in channel.sent_messages[0].content
 
@@ -799,7 +799,7 @@ def test_backfill_command_rejects_invalid_date_format():
 def test_profile_command_returns_summary_for_player():
     channel = FakeChannel(channel_id=999)
     incoming = FakeIncomingMessage("!profile Alpha#NA1", channel)
-    mood_service = FakeMoodService(build_outputs=["unused"])
+    poro_service = FakePoroService(build_outputs=["unused"])
     riot_client = FakeRiotClient()
 
     now_ms = 1_738_500_000_000
@@ -831,7 +831,7 @@ def test_profile_command_returns_summary_for_player():
         },
     }
 
-    mood_service.db_load_latest_stats = lambda _cycle: [
+    poro_service.db_load_latest_stats = lambda _cycle: [
         {
             "riot_id": "Alpha#NA1",
             "solo_wins": 3,
@@ -850,7 +850,7 @@ def test_profile_command_returns_summary_for_player():
             "primary_role": "MIDDLE",
         }
     ]
-    mood_service.db_load_weekly_stats = lambda _start, _end: [
+    poro_service.db_load_weekly_stats = lambda _start, _end: [
         {
             "riot_id": "Alpha#NA1",
             "solo_wins": 8,
@@ -875,12 +875,12 @@ def test_profile_command_returns_summary_for_player():
             channel_id=777,
             friends=["Alpha#NA1"],
             riot_client=riot_client,
-            mood_service=mood_service,
+            poro_service=poro_service,
             report_timezone_name="UTC",
             report_day_start_hour=6,
             db_enabled=True,
             start_monotonic=0.0,
-            mood_request_lock=asyncio.Lock(),
+            daily_request_lock=asyncio.Lock(),
             request_id_context=contextvars.ContextVar("request_id", default=None),
             create_request_id=lambda _prefix: "profile-1234",
             get_or_create_report_message=lambda _channel, _initial_content: None,

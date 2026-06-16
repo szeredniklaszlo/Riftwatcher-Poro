@@ -1,6 +1,6 @@
 TEST_COMMAND = "!test"
 RIOT_TEST_COMMAND = "!riottest"
-MOOD_COMMAND = "!Daily"
+DAILY_COMMAND = "!Daily"
 WEEK_COMMAND = "!Weekly"
 ADD_COMMAND = "!Add"
 REMOVE_COMMAND = "!remove"

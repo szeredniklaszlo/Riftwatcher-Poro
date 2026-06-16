@@ -36,7 +36,7 @@ Start with:
 - `src/discord_command_handlers.py` - command entrypoint/delegator
 - `src/commands/` - command context, routing, and domain-specific handlers
 - `src/discord_text.py` - Discord text/render helpers
-- `src/mood_service.py` - report orchestration and refresh logic
+- `src/poro_service.py` - report orchestration and refresh logic
 - `src/services/` - mood-service helper modules (report builder, refresh, baselines)
 - `src/riot_api.py` - Riot API client, retries, match fetch/cache behavior
 - `src/discord_recap_worker.py` - recap polling and recap -> stats sync

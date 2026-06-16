@@ -124,12 +124,12 @@ def test_remember_weekly_report_message_updates_state_without_db():
 def test_previous_day_placeholder_text_uses_clean_header_symbols():
     text = build_previous_day_placeholder_text()
     assert "✨" in text
-    assert "LEAGUE MOOD (PREVIOUS DAY)" in text
+    assert "RIFTWATCHER PORO (PREVIOUS DAY)" in text
 
 
 def test_format_previous_day_report_text_rewrites_first_line_with_cycle_date():
     text = format_previous_day_report_text("old header\nline2", "2026-02-24")
-    assert text.splitlines()[0] == "✨------ **LEAGUE MOOD (PREVIOUS DAY - 24.02.2026)** ------✨"
+    assert text.splitlines()[0] == "✨------ **RIFTWATCHER PORO (PREVIOUS DAY - 24.02.2026)** ------✨"
 
 
 def test_get_or_create_report_message_rollover_updates_previous_message():
@@ -144,7 +144,7 @@ def test_get_or_create_report_message_rollover_updates_previous_message():
         today.content = "header today\nbody"
         channel = FakeFetchChannel(10, {1: previous, 2: today})
 
-        class MoodService:
+        class PoroService:
             @staticmethod
             def get_cycle_key():
                 return "2026-02-25"
@@ -159,7 +159,7 @@ def test_get_or_create_report_message_rollover_updates_previous_message():
             state=state,
             channel=channel,
             initial_content="init",
-            mood_service=MoodService(),
+            poro_service=PoroService(),
             db_enabled=False,
             db_get_state=lambda _k: None,
             db_set_state=lambda _k, _v: None,
@@ -199,7 +199,7 @@ def test_get_or_create_report_message_keeps_today_id_on_fetch_http_exception():
         )
         channel = FakeFetchChannel(10, {1: previous, 2: today}, fetch_exceptions={2: http_error})
 
-        class MoodService:
+        class PoroService:
             @staticmethod
             def get_cycle_key():
                 return "2026-02-25"
@@ -208,7 +208,7 @@ def test_get_or_create_report_message_keeps_today_id_on_fetch_http_exception():
             state=state,
             channel=channel,
             initial_content="init",
-            mood_service=MoodService(),
+            poro_service=PoroService(),
             db_enabled=False,
             db_get_state=lambda _k: None,
             db_set_state=lambda _k, _v: None,

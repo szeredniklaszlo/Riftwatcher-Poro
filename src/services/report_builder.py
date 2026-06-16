@@ -125,7 +125,7 @@ def format_report_from_results(
     empty_line_1="Looks like everyone has a life today.",
     empty_line_2="We will keep you up to date if anyone crawls back into the hole.",
 ):
-    report_lines = [f"\u2728------ **LEAGUE MOOD ({header_title})** ------\u2728", ""]
+    report_lines = [f"\u2728------ **RIFTWATCHER PORO ({header_title})** ------\u2728", ""]
     updated_at = datetime.now(tz=service.report_timezone).strftime("%d.%m.%Y %H:%M")
     if not ranked_results and not error_results:
         report_lines.append(empty_line_1)
@@ -135,7 +135,7 @@ def format_report_from_results(
         report_lines.append(f"_Last updated: {updated_at}_")
         total_elapsed_ms = int((time.perf_counter() - report_start) * 1000)
         service.log(
-            f"[mood] Report complete: players={len(service.friends)} "
+            f"[poro] Report complete: players={len(service.friends)} "
             "ranked=0 hidden_no_matches=all errors=0 "
             f"elapsed={total_elapsed_ms}ms"
         )
@@ -192,7 +192,7 @@ def format_report_from_results(
     report_lines.append(f"_Last updated: {updated_at}_")
     total_elapsed_ms = int((time.perf_counter() - report_start) * 1000)
     service.log(
-        f"[mood] Report complete: players={len(service.friends)} "
+        f"[poro] Report complete: players={len(service.friends)} "
         f"ranked={len(ranked_results)} hidden_no_matches={len(service.friends) - len(ranked_results) - len(error_results)} "
         f"errors={len(error_results)} elapsed={total_elapsed_ms}ms"
     )
@@ -200,7 +200,7 @@ def format_report_from_results(
     if len(report_text) <= 2000:
         return report_text
 
-    compact_lines = [f"\u2728------ **LEAGUE MOOD ({header_title})** ------\u2728", ""]
+    compact_lines = [f"\u2728------ **RIFTWATCHER PORO ({header_title})** ------\u2728", ""]
     for index, (lol_name, _mode_records, wins, losses, win_rate, _performance, *_rest) in enumerate(ranked_results):
         display_emoji = "\u2B50" if index == 0 else "\U0001F642"
         badges = "".join(badges_by_player.get(lol_name, []))

@@ -1,26 +1,26 @@
 import discord
 import requests
 
-from src.constants import MOOD_COMMAND, WEEK_COMMAND
+from src.constants import DAILY_COMMAND, WEEK_COMMAND
 
 
 async def handle_report_commands(ctx):
     content_lower = ctx.content_lower
 
-    if content_lower == MOOD_COMMAND.casefold():
-        request_id = ctx.create_request_id("mood")
+    if content_lower == DAILY_COMMAND.casefold():
+        request_id = ctx.create_request_id("poro")
         token = ctx.request_id_context.set(request_id)
         try:
             await ctx.message.delete()
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
-            ctx.log(f"[mood] Could not delete command message {ctx.message.id}: {exc}")
+            ctx.log(f"[poro] Could not delete command message {ctx.message.id}: {exc}")
 
         try:
-            if ctx.mood_request_lock.locked():
+            if ctx.daily_request_lock.locked():
                 await ctx.message.channel.send("\u23F3 Another report is already in progress. Please wait.")
                 return True
 
-            async with ctx.mood_request_lock:
+            async with ctx.daily_request_lock:
                 loading_text = (
                     f"\u23F3 Gathering match results since {ctx.report_day_start_hour:02d}:00 from Riot..."
                 )
@@ -29,7 +29,7 @@ async def handle_report_commands(ctx):
                     await status_message.edit(content=loading_text)
                 try:
                     if ctx.db_enabled:
-                        snapshot_text = await ctx.mood_service.build_today_win_rate_report()
+                        snapshot_text = await ctx.poro_service.build_today_win_rate_report()
                         refresh_note = "_Refreshing latest matches..._"
                         snapshot_with_note = f"{snapshot_text}\n\n{refresh_note}"
                         if len(snapshot_with_note) > 2000:
@@ -37,15 +37,15 @@ async def handle_report_commands(ctx):
                         await status_message.edit(content=snapshot_with_note)
                         displayed_text = snapshot_with_note
                         ctx.remember_report_message(status_message)
-                        ctx.log(f"[mood] Sent stored snapshot report in channel {ctx.daily_channel_id}.")
+                        ctx.log(f"[poro] Sent stored snapshot report in channel {ctx.daily_channel_id}.")
 
-                        await ctx.mood_service.refresh_recent_matches_snapshot(recent_count=20)
-                        refreshed_text = await ctx.mood_service.build_today_win_rate_report()
+                        await ctx.poro_service.refresh_recent_matches_snapshot(recent_count=20)
+                        refreshed_text = await ctx.poro_service.build_today_win_rate_report()
                         if refreshed_text != displayed_text:
                             await status_message.edit(content=refreshed_text)
-                            ctx.log(f"[mood] Updated report after quick refresh in channel {ctx.daily_channel_id}.")
+                            ctx.log(f"[poro] Updated report after quick refresh in channel {ctx.daily_channel_id}.")
                         else:
-                            ctx.log("[mood] Quick refresh produced no visible report change.")
+                            ctx.log("[poro] Quick refresh produced no visible report change.")
                     else:
                         async def progress(done, total, last_name):
                             await status_message.edit(
@@ -55,19 +55,19 @@ async def handle_report_commands(ctx):
                                 )
                             )
 
-                        report_text = await ctx.mood_service.build_today_win_rate_report(progress_callback=progress)
+                        report_text = await ctx.poro_service.build_today_win_rate_report(progress_callback=progress)
                         await status_message.edit(content=report_text)
                         ctx.remember_report_message(status_message)
                         ctx.log(
-                            f"[mood] Sent cycle win rate report (since {ctx.report_day_start_hour:02d}:00) "
+                            f"[poro] Sent cycle win rate report (since {ctx.report_day_start_hour:02d}:00) "
                             f"in channel {ctx.daily_channel_id}."
                         )
                 except (KeyError, requests.RequestException) as exc:
-                    await status_message.edit(content=f"Mood report failed: {exc}")
-                    ctx.log(f"[mood] Mood report failed: {exc}")
+                    await status_message.edit(content=f"Daily report failed: {exc}")
+                    ctx.log(f"[poro] Daily report failed: {exc}")
                 except Exception as exc:
-                    await status_message.edit(content=f"Mood report failed unexpectedly: {exc}")
-                    ctx.log(f"[mood] Unexpected mood report failure: {exc}")
+                    await status_message.edit(content=f"Daily report failed unexpectedly: {exc}")
+                    ctx.log(f"[poro] Unexpected daily report failure: {exc}")
         finally:
             ctx.request_id_context.reset(token)
         return True
@@ -81,11 +81,11 @@ async def handle_report_commands(ctx):
             ctx.log(f"[week] Could not delete command message {ctx.message.id}: {exc}")
 
         try:
-            if ctx.mood_request_lock.locked():
+            if ctx.daily_request_lock.locked():
                 await ctx.message.channel.send("\u23F3 Another report is already in progress. Please wait.")
                 return True
 
-            async with ctx.mood_request_lock:
+            async with ctx.daily_request_lock:
                 if ctx.get_or_create_weekly_report_message is None:
                     await ctx.message.channel.send("Weekly report is not configured.")
                     return True
@@ -104,7 +104,7 @@ async def handle_report_commands(ctx):
                 status_message = await ctx.get_or_create_weekly_report_message(target_channel, loading_text)
                 if status_message.content != loading_text:
                     await status_message.edit(content=loading_text)
-                report_text = await ctx.mood_service.build_weekly_win_rate_report(bypass_cache=True)
+                report_text = await ctx.poro_service.build_weekly_win_rate_report(bypass_cache=True)
                 await status_message.edit(content=report_text)
                 if ctx.remember_weekly_report_message is not None:
                     ctx.remember_weekly_report_message(status_message)

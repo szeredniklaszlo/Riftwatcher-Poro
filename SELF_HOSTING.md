@@ -29,7 +29,7 @@ Riftwatcher Poro is not endorsed by Riot Games. Keep the Riot disclaimer from `R
    - Manage messages is not required
    - Use TTS if you want streak callouts with TTS
 
-MoodBot currently uses `!commands`, so Message Content Intent is required.
+Riftwatcher Poro currently uses `!commands`, so Message Content Intent is required.
 
 ## 2. Create Discord Channels
 

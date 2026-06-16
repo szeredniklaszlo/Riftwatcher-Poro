@@ -68,7 +68,7 @@ class FakeRiotClient:
         return None
 
 
-class FakeMoodService:
+class FakePoroService:
     def __init__(self):
         self.invalidated = False
 
@@ -96,7 +96,7 @@ class FakeMoodService:
 def test_process_recap_cycle_posts_recap_and_syncs_affected_players():
     channel = FakeChannel()
     riot = FakeRiotClient()
-    mood = FakeMoodService()
+    mood = FakePoroService()
     now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
     riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a", "Bravo#NA1": "puuid-b"}
@@ -143,7 +143,7 @@ def test_process_recap_cycle_posts_recap_and_syncs_affected_players():
         process_recap_cycle(
             friends=["Alpha#NA1", "Bravo#NA1"],
             riot_client=riot,
-            mood_service=mood,
+            poro_service=mood,
             report_timezone=timezone.utc,
             match_recap_channel_id=123,
             channel=channel,
@@ -171,7 +171,7 @@ def test_process_recap_cycle_posts_recap_and_syncs_affected_players():
 def test_process_recap_cycle_posts_streak_callout_when_threshold_crossed():
     channel = FakeChannel()
     riot = FakeRiotClient()
-    mood = FakeMoodService()
+    mood = FakePoroService()
     now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
     riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a"}
@@ -221,7 +221,7 @@ def test_process_recap_cycle_posts_streak_callout_when_threshold_crossed():
         process_recap_cycle(
             friends=["Alpha#NA1"],
             riot_client=riot,
-            mood_service=mood,
+            poro_service=mood,
             report_timezone=timezone.utc,
             match_recap_channel_id=123,
             channel=channel,
@@ -244,7 +244,7 @@ def test_process_recap_cycle_posts_streak_callout_when_threshold_crossed():
 def test_process_recap_cycle_posts_streak_callout_without_tts_when_disabled():
     channel = FakeChannel()
     riot = FakeRiotClient()
-    mood = FakeMoodService()
+    mood = FakePoroService()
     now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
     riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a"}
@@ -297,7 +297,7 @@ def test_process_recap_cycle_posts_streak_callout_without_tts_when_disabled():
         process_recap_cycle(
             friends=["Alpha#NA1"],
             riot_client=riot,
-            mood_service=mood,
+            poro_service=mood,
             report_timezone=timezone.utc,
             match_recap_channel_id=123,
             channel=channel,
@@ -317,7 +317,7 @@ def test_process_recap_cycle_posts_streak_callout_without_tts_when_disabled():
 def test_process_recap_cycle_no_new_matches_skips_post_and_sync():
     channel = FakeChannel()
     riot = FakeRiotClient()
-    mood = FakeMoodService()
+    mood = FakePoroService()
 
     riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a"}
     riot.recent_ids_by_puuid = {"puuid-a": ["EUW1_1", "EUW1_0"]}
@@ -344,7 +344,7 @@ def test_process_recap_cycle_no_new_matches_skips_post_and_sync():
         process_recap_cycle(
             friends=["Alpha#NA1"],
             riot_client=riot,
-            mood_service=mood,
+            poro_service=mood,
             report_timezone=timezone.utc,
             match_recap_channel_id=123,
             channel=channel,
@@ -368,7 +368,7 @@ def test_process_recap_cycle_no_new_matches_skips_post_and_sync():
 def test_process_recap_cycle_skips_remake_notifications_and_sync():
     channel = FakeChannel()
     riot = FakeRiotClient()
-    mood = FakeMoodService()
+    mood = FakePoroService()
     now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
     riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a"}
@@ -403,7 +403,7 @@ def test_process_recap_cycle_skips_remake_notifications_and_sync():
         process_recap_cycle(
             friends=["Alpha#NA1"],
             riot_client=riot,
-            mood_service=mood,
+            poro_service=mood,
             report_timezone=timezone.utc,
             match_recap_channel_id=123,
             channel=channel,
@@ -427,7 +427,7 @@ def test_process_recap_cycle_skips_remake_notifications_and_sync():
 def test_process_recap_cycle_batches_multiple_matches_into_single_post():
     channel = FakeChannel()
     riot = FakeRiotClient()
-    mood = FakeMoodService()
+    mood = FakePoroService()
     now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
     riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a"}
@@ -473,7 +473,7 @@ def test_process_recap_cycle_batches_multiple_matches_into_single_post():
         process_recap_cycle(
             friends=["Alpha#NA1"],
             riot_client=riot,
-            mood_service=mood,
+            poro_service=mood,
             report_timezone=timezone.utc,
             match_recap_channel_id=123,
             channel=channel,
@@ -496,7 +496,7 @@ def test_process_recap_cycle_batches_multiple_matches_into_single_post():
 def test_process_recap_cycle_formats_arena_3x6_by_placement():
     channel = FakeChannel()
     riot = FakeRiotClient()
-    mood = FakeMoodService()
+    mood = FakePoroService()
     now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
     alpha = _participant("puuid-a", win=False)
@@ -565,7 +565,7 @@ def test_process_recap_cycle_formats_arena_3x6_by_placement():
             process_recap_cycle(
                 friends=["Bravo#NA1", "Alpha#NA1"],
                 riot_client=riot,
-                mood_service=mood,
+                poro_service=mood,
                 report_timezone=timezone.utc,
                 match_recap_channel_id=123,
                 channel=channel,
@@ -597,7 +597,7 @@ def test_process_recap_cycle_formats_arena_3x6_by_placement():
 def test_process_recap_cycle_does_not_advance_state_when_match_fetch_fails():
     channel = FakeChannel()
     riot = FakeRiotClient()
-    mood = FakeMoodService()
+    mood = FakePoroService()
 
     riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a"}
     riot.recent_ids_by_puuid = {"puuid-a": ["EUW1_2", "EUW1_1"]}
@@ -627,7 +627,7 @@ def test_process_recap_cycle_does_not_advance_state_when_match_fetch_fails():
         process_recap_cycle(
             friends=["Alpha#NA1"],
             riot_client=riot,
-            mood_service=mood,
+            poro_service=mood,
             report_timezone=timezone.utc,
             match_recap_channel_id=123,
             channel=channel,
@@ -648,7 +648,7 @@ def test_process_recap_cycle_does_not_advance_state_when_match_fetch_fails():
 def test_process_recap_cycle_keeps_recap_and_streak_separate_with_tts_toggle(tts_state, expected_tts):
     channel = FakeChannel()
     riot = FakeRiotClient()
-    mood = FakeMoodService()
+    mood = FakePoroService()
     now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
     riot.puuid_by_riot_id = {"Alpha#NA1": "puuid-a"}
@@ -701,7 +701,7 @@ def test_process_recap_cycle_keeps_recap_and_streak_separate_with_tts_toggle(tts
         process_recap_cycle(
             friends=["Alpha#NA1"],
             riot_client=riot,
-            mood_service=mood,
+            poro_service=mood,
             report_timezone=timezone.utc,
             match_recap_channel_id=123,
             channel=channel,

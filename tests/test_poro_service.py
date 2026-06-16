@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from src.mood_service import MoodService
+from src.poro_service import PoroService
 
 
 class FakeRiotClient:
@@ -49,7 +49,7 @@ def _create_service(
     db_get_last_seen_match_id=lambda _riot_id: None,
     db_set_last_seen_match_id=lambda _riot_id, _match_id: None,
 ):
-    return MoodService(
+    return PoroService(
         log=lambda _message: None,
         friends=friends,
         riot_client=riot_client,
@@ -95,17 +95,17 @@ def _stats_row(riot_id, updated_at, *, solo_wins=0, solo_losses=0, flex_wins=0, 
 
 def test_get_new_match_ids_when_last_seen_present():
     recent_ids = ["m5", "m4", "m3", "m2"]
-    assert MoodService.get_new_match_ids(recent_ids, "m3") == ["m5", "m4"]
+    assert PoroService.get_new_match_ids(recent_ids, "m3") == ["m5", "m4"]
 
 
 def test_get_new_match_ids_when_last_seen_missing():
     recent_ids = ["m5", "m4"]
-    assert MoodService.get_new_match_ids(recent_ids, None) == ["m5", "m4"]
+    assert PoroService.get_new_match_ids(recent_ids, None) == ["m5", "m4"]
 
 
 def test_get_new_match_ids_when_no_new_matches():
     recent_ids = ["m5", "m4"]
-    assert MoodService.get_new_match_ids(recent_ids, "m5") == []
+    assert PoroService.get_new_match_ids(recent_ids, "m5") == []
 
 
 def test_get_leader_badges_by_player_marks_category_leads():
@@ -148,7 +148,7 @@ def test_get_leader_badges_by_player_marks_category_leads():
         ),
     ]
 
-    badges = MoodService.get_leader_badges_by_player(ranked_results)
+    badges = PoroService.get_leader_badges_by_player(ranked_results)
     assert "\U0001F33E" in badges["Alpha"]
     assert "\U0001F3F0" in badges["Alpha"]
     assert "\u2764\uFE0F" in badges["Alpha"]
@@ -266,13 +266,13 @@ def test_build_weekly_report_aggregates_full_week_rows():
 
     report = asyncio.run(service.build_weekly_win_rate_report())
 
-    assert "LEAGUE MOOD (WEEKLY)" in report
+    assert "RIFTWATCHER PORO (WEEKLY)" in report
     assert "Alpha" in report
     assert "`5W-1L`" in report
 
 
 def test_get_week_window_respects_day_start_cutoff():
-    service = MoodService(
+    service = PoroService(
         log=lambda _message: None,
         friends=[],
         riot_client=FakeRiotClient(),
@@ -503,7 +503,7 @@ def test_refresh_daily_stats_once_starts_with_oldest_collected_player():
 
 
 def test_run_health_check_includes_backfill_offsets_for_tracked_players():
-    service = MoodService(
+    service = PoroService(
         log=lambda _message: None,
         friends=["Alpha#NA1", "Bravo#NA1"],
         riot_client=FakeRiotClient(),
@@ -570,7 +570,7 @@ def test_backfill_daily_stats_from_cache_rebuilds_range_from_cached_payloads():
     ]
 
     upserts = []
-    service = MoodService(
+    service = PoroService(
         log=lambda _msg: None,
         friends=["Alpha#NA1"],
         riot_client=riot,

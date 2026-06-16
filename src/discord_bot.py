@@ -10,8 +10,8 @@ from src import config as cfg
 from src import db as dbm
 from src.discord_command_handlers import handle_incoming_message
 from src.discord_text import create_request_id
-from src.constants import ADD_COMMAND, BACKFILL_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, MOOD_COMMAND, REMOVE_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND, WEEK_COMMAND
-from src.mood_service import MoodService
+from src.constants import ADD_COMMAND, BACKFILL_COMMAND, DEBUG_PLAYER_COMMAND, HEALTH_COMMAND, DAILY_COMMAND, REMOVE_COMMAND, RIOT_TEST_COMMAND, TEST_COMMAND, WEEK_COMMAND
+from src.poro_service import PoroService
 from src.riot_api import RiotApiClient
 from src.runtime.alerts import RiotAlertState, trigger_riot_key_alert as runtime_trigger_riot_key_alert
 from src.runtime.alerts import check_and_notify_worker_stalls as runtime_check_and_notify_worker_stalls
@@ -124,7 +124,7 @@ FRIENDS = load_tracked_players()
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
-MOOD_REQUEST_LOCK = asyncio.Lock()
+DAILY_REQUEST_LOCK = asyncio.Lock()
 
 MESSAGE_STATE = create_message_state()
 LAST_REPORT_MESSAGE = MESSAGE_STATE["last_report_message"]
@@ -169,7 +169,7 @@ riot_client = RiotApiClient(
     on_unauthorized=trigger_riot_key_alert,
 )
 
-mood_service = MoodService(
+poro_service = PoroService(
     log=log,
     friends=FRIENDS,
     riot_client=riot_client,
@@ -237,7 +237,7 @@ async def get_or_create_report_message(channel, initial_content):
         state=MESSAGE_STATE,
         channel=channel,
         initial_content=initial_content,
-        mood_service=mood_service,
+        poro_service=poro_service,
         db_enabled=DB_ENABLED,
         db_get_state=db_get_state,
         db_set_state=db_set_state,
@@ -266,7 +266,7 @@ async def edit_last_report_message(prefer_snapshot=False, bypass_cache=False):
         return
 
     try:
-        report_text = await mood_service.build_today_win_rate_report(
+        report_text = await poro_service.build_today_win_rate_report(
             prefer_snapshot=prefer_snapshot,
             bypass_cache=bypass_cache,
         )
@@ -297,7 +297,7 @@ async def edit_last_weekly_report_message(bypass_cache=False):
         return
 
     try:
-        report_text = await mood_service.build_weekly_win_rate_report(bypass_cache=bypass_cache)
+        report_text = await poro_service.build_weekly_win_rate_report(bypass_cache=bypass_cache)
         message = await channel.fetch_message(message_id)
         if message.content == report_text:
             log(f"[refresh] No weekly report change; skipped editing message {message_id}.")
@@ -315,7 +315,7 @@ async def edit_last_weekly_report_message(bypass_cache=False):
 
 
 async def daily_report(channel):
-    report_text = await mood_service.build_today_win_rate_report()
+    report_text = await poro_service.build_today_win_rate_report()
     report_message = await get_or_create_report_message(channel, report_text)
     if report_message.content != report_text:
         await report_message.edit(content=report_text)
@@ -325,7 +325,7 @@ async def daily_report(channel):
 
 
 async def weekly_report(channel):
-    report_text = await mood_service.build_weekly_win_rate_report()
+    report_text = await poro_service.build_weekly_win_rate_report()
     report_message = await get_or_create_weekly_report_message(channel, report_text)
     if report_message.content != report_text:
         await report_message.edit(content=report_text)
@@ -366,7 +366,7 @@ async def background_match_recap_notifier():
         request_id_context=REQUEST_ID_CONTEXT,
         friends=FRIENDS,
         riot_client=riot_client,
-        mood_service=mood_service,
+        poro_service=poro_service,
         report_timezone=REPORT_TIMEZONE,
         match_recap_channel_id=MATCH_RECAP_CHANNEL_ID,
         db_enabled=DB_ENABLED,
@@ -404,7 +404,7 @@ async def background_daily_refresher():
         daily_refresh_seconds=DAILY_REFRESH_SECONDS,
         client=client,
         request_id_context=REQUEST_ID_CONTEXT,
-        mood_service=mood_service,
+        poro_service=poro_service,
         resolve_channel=resolve_channel,
         daily_report_channel_id=DAILY_REPORT_CHANNEL_ID,
         get_or_create_report_message=get_or_create_report_message,
@@ -450,7 +450,7 @@ async def on_ready():
     log(f"[startup] Use {TEST_COMMAND} in channel {EVENTS_CHANNEL_ID} to test sending.")
     log(f"[startup] Use {RIOT_TEST_COMMAND} in channel {EVENTS_CHANNEL_ID} to test Riot API access.")
     log(
-        f"[startup] Use {MOOD_COMMAND} in channel {DAILY_REPORT_CHANNEL_ID} for results "
+        f"[startup] Use {DAILY_COMMAND} in channel {DAILY_REPORT_CHANNEL_ID} for results "
         f"since {REPORT_DAY_START_HOUR:02d}:00."
     )
     log(
@@ -521,12 +521,12 @@ async def on_message(message):
         channel_id=DAILY_REPORT_CHANNEL_ID,
         friends=FRIENDS,
         riot_client=riot_client,
-        mood_service=mood_service,
+        poro_service=poro_service,
         report_timezone_name=REPORT_TIMEZONE_NAME,
         report_day_start_hour=REPORT_DAY_START_HOUR,
         db_enabled=DB_ENABLED,
         start_monotonic=START_MONOTONIC,
-        mood_request_lock=MOOD_REQUEST_LOCK,
+        daily_request_lock=DAILY_REQUEST_LOCK,
         request_id_context=REQUEST_ID_CONTEXT,
         create_request_id=create_request_id,
         get_or_create_report_message=get_or_create_report_message,
@@ -553,18 +553,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

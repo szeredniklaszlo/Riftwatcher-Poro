@@ -60,7 +60,7 @@ Expected behavior:
 
 If behavior looks merged:
 1. Verify bot version is current deployment.
-2. Check for custom/manual posting logic outside MoodBot.
+2. Check for custom/manual posting logic outside Riftwatcher Poro.
 3. Run tests: `python -m pytest -q tests/test_discord_recap_worker.py`.
 
 ## Arena Recap Troubleshooting

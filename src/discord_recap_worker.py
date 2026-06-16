@@ -79,7 +79,7 @@ async def process_recap_cycle(
     *,
     friends,
     riot_client,
-    mood_service,
+    poro_service,
     report_timezone,
     match_recap_channel_id,
     channel,
@@ -121,7 +121,7 @@ async def process_recap_cycle(
                 initialized_players += 1
                 continue
 
-            new_match_ids = mood_service.get_new_match_ids(recent_ids, last_announced)
+            new_match_ids = poro_service.get_new_match_ids(recent_ids, last_announced)
             if new_match_ids:
                 matches_to_report.update(new_match_ids)
                 pending_latest_match_id_by_riot[riot_id] = latest_match_id
@@ -290,7 +290,7 @@ async def process_recap_cycle(
         return
 
     try:
-        cycle_key = mood_service.get_cycle_key()
+        cycle_key = poro_service.get_cycle_key()
 
         for riot_id in sorted(affected_riot_ids, key=str.casefold):
             mode_records, performance_totals = await riot_client.get_today_mode_records(riot_id)
@@ -304,7 +304,7 @@ async def process_recap_cycle(
                 primary_role,
             )
 
-        mood_service.invalidate_report_cache()
+        poro_service.invalidate_report_cache()
         await edit_last_report_message(bypass_cache=True)
         if edit_last_weekly_report_message is not None:
             await edit_last_weekly_report_message(bypass_cache=True)
