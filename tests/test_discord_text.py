@@ -73,6 +73,7 @@ def test_format_recap_player_line_uses_arena_placement():
     assert "Damage 45,000" in line
     assert "Augments Warmup Routine, Scoped Weapons" in line
     assert "Items Zhonya's Hourglass, Rabadon's Deathcap" in line
+    assert "`\n   🛒 `Items" in line
     assert "Ã¢â‚¬Â¢" not in line
     assert "CS/min" not in line
     assert "Vision" not in line

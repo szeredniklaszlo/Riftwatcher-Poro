@@ -157,13 +157,10 @@ def format_recap_player_line(
         ]
         augments = get_arena_augments(participant, augment_names=augment_names)
         items = get_participant_items(participant, item_names=item_names)
-        loadout_parts = []
         if augments:
-            loadout_parts.append(f"\U0001F52E `Augments {', '.join(augments)}`")
+            lines.append(f"   \U0001F52E `Augments {', '.join(augments)}`")
         if items:
-            loadout_parts.append(f"\U0001F6D2 `Items {', '.join(items)}`")
-        if loadout_parts:
-            lines.append(f"   {'  '.join(loadout_parts)}")
+            lines.append(f"   \U0001F6D2 `Items {', '.join(items)}`")
         return "\n".join(lines)
 
     won = bool(participant.get("win"))

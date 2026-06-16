@@ -576,6 +576,7 @@ def test_process_recap_cycle_formats_arena_3x6_by_placement():
     assert "Place #4" in content
     assert "Augments Warmup Routine, Scoped Weapons" in content
     assert "Items Zhonya's Hourglass, Rabadon's Deathcap" in content
+    assert "`\n   🛒 `Items" in content
     assert "CS/min" not in content
 
 
