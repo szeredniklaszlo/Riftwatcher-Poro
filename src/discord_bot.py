@@ -581,10 +581,11 @@ async def on_message(message):
         
         status = await message.channel.send("Syncing slash commands...")
         try:
-            # Sync to the current guild for immediate availability during testing
-            synced = await client.tree.sync()
-            await status.edit(content=f"Successfully synced {len(synced)} global commands.")
-            log(f"[startup] Synced {len(synced)} global commands via !sync.")
+            # Copy global commands to this specific guild for instant updates
+            client.tree.copy_global_to(guild=message.guild)
+            synced = await client.tree.sync(guild=message.guild)
+            await status.edit(content=f"Successfully synced {len(synced)} commands to this server.")
+            log(f"[startup] Synced {len(synced)} guild commands via !sync.")
         except Exception as exc:
             await status.edit(content=f"Failed to sync commands: {exc}")
             log(f"[error] Sync failed: {exc}")
