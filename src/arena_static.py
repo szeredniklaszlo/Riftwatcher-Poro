@@ -18,9 +18,17 @@ def _fetch_json(url):
     return response.json()
 
 
+HARDCODED_AUGMENTS = {
+    "390": "Infernal Conduit",
+    "1344": "Phenomenal Evil",
+}
+
 def _load_augment_names():
-    data = _fetch_json(COMMUNITY_DRAGON_ARENA_URL)
-    names = {}
+    try:
+        data = _fetch_json(COMMUNITY_DRAGON_ARENA_URL)
+    except requests.RequestException:
+        data = {"augments": []}
+    names = HARDCODED_AUGMENTS.copy()
     for row in data.get("augments", []) or []:
         augment_id = row.get("id")
         name = row.get("name")

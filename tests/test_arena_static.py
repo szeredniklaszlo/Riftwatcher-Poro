@@ -19,7 +19,12 @@ def test_load_arena_display_names_parses_augments_and_items(monkeypatch):
 
     names = arena_static.load_arena_display_names()
 
-    assert names["augment_names"] == {"93": "Warmup Routine", "323": "Cerberus"}
+    assert names["augment_names"] == {
+        "93": "Warmup Routine", 
+        "323": "Cerberus",
+        "390": "Infernal Conduit",
+        "1344": "Phenomenal Evil",
+    }
     assert names["item_names"] == {"3157": "Zhonya's Hourglass", "3089": "Rabadon's Deathcap"}
 
     arena_static.reset_arena_display_name_cache()
@@ -35,6 +40,9 @@ def test_load_arena_display_names_falls_back_to_empty_maps(monkeypatch):
 
     names = arena_static.load_arena_display_names()
 
-    assert names == {"augment_names": {}, "item_names": {}}
+    assert names == {
+        "augment_names": {"390": "Infernal Conduit", "1344": "Phenomenal Evil"}, 
+        "item_names": {}
+    }
 
     arena_static.reset_arena_display_name_cache()
