@@ -133,6 +133,17 @@ def get_arena_skillshot_stats(participant):
     return hit, dodged
 
 
+def get_arena_team_damage_percentage(participant):
+    challenges = participant.get("challenges") or {}
+    value = challenges.get("teamDamagePercentage")
+    if value is None:
+        return None
+    try:
+        return float(value) * 100.0
+    except (TypeError, ValueError):
+        return None
+
+
 def format_recap_player_line(
     riot_id,
     participant,
@@ -148,6 +159,7 @@ def format_recap_player_line(
     assists = int(participant.get("assists", 0) or 0)
     player_damage = int(participant.get("totalDamageDealtToChampions", 0) or 0)
     healing = int(participant.get("totalHeal", 0) or 0)
+    shielded = int(participant.get("totalDamageShieldedOnTeammates", 0) or 0)
     damage_taken = int(participant.get("totalDamageTaken", 0) or 0)
 
     if queue_id in ARENA_QUEUE_IDS:
@@ -157,10 +169,13 @@ def format_recap_player_line(
         subteam_id = get_arena_subteam_id(participant)
         team_label = f"Team {subteam_id}" if subteam_id is not None else "Team ?"
         gold_earned = int(participant.get("goldEarned", 0) or 0)
+        damage_share = get_arena_team_damage_percentage(participant)
+        damage_label = f"{damage_share:.1f}%" if damage_share is not None else "N/A"
         lines = [
             f"{result_emoji} **{lol_name}** | `{team_label}` \u2022 **{champion}** - **Place {placement_label}**\n"
-            f"   \u2694\uFE0F `K/D/A {kills}/{deaths}/{assists}`  \U0001F4A5 `Damage {player_damage:,}`\n"
-            f"   \U0001F6E1\uFE0F `Taken {damage_taken:,}`  \u2764\uFE0F `Healing {healing:,}`  \U0001FA99 `Gold {gold_earned:,}`"
+            f"   \u2694\uFE0F `K/D/A {kills}/{deaths}/{assists}`  \U0001F4A5 `Team Dmg {damage_label}`\n"
+            f"   \U0001FA78 `Taken {damage_taken:,}`  \u2764\uFE0F `Healing {healing:,}`  \U0001F6E1\uFE0F `Shielded {shielded:,}`\n"
+            f"   \U0001FA99 `Gold {gold_earned:,}`"
         ]
         augments = get_arena_augments(participant, augment_names=augment_names)
         items = get_participant_items(participant, item_names=item_names)

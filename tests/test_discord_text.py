@@ -1,4 +1,9 @@
-from src.discord_text import format_match_duration, format_recap_player_line, format_recap_queue_name, format_streak_callout
+from src.discord_text import (
+    format_match_duration,
+    format_recap_player_line,
+    format_recap_queue_name,
+    format_streak_callout,
+)
 
 
 def test_format_recap_player_line_uses_bullet_separator():
@@ -48,6 +53,7 @@ def test_format_recap_player_line_uses_arena_placement():
         "totalDamageDealtToChampions": 45000,
         "totalDamageTaken": 38000,
         "totalHeal": 9000,
+        "totalDamageShieldedOnTeammates": 1234,
         "goldEarned": 15000,
         "playerAugment1": 101,
         "playerAugment2": 202,
@@ -56,6 +62,7 @@ def test_format_recap_player_line_uses_arena_placement():
         "item1": 3089,
         "item2": 0,
         "challenges": {
+            "teamDamagePercentage": 0.321,
             "skillshotsHit": 13,
             "skillshotsDodged": 42,
         },
@@ -74,7 +81,10 @@ def test_format_recap_player_line_uses_arena_placement():
     assert "`Team 4`" in line
     assert "**Sett** - **Place #2**" in line
     assert "K/D/A 9/4/12" in line
-    assert "Damage 45,000" in line
+    assert "Team Dmg 32.1%" in line
+    assert "🩸 `Taken 38,000`" in line
+    assert "Healing 9,000" in line
+    assert "Shielded 1,234" in line
     assert "Skillshots hit 13" in line
     assert "Dodged 42" in line
     assert "Augments Warmup Routine, Scoped Weapons" in line

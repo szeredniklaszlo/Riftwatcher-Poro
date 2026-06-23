@@ -505,11 +505,13 @@ def test_process_recap_cycle_formats_arena_3x6_by_placement():
         "placement": 1,
         "playerSubteamId": 2,
         "goldEarned": 18000,
+        "totalDamageShieldedOnTeammates": 2345,
         "playerAugment1": 101,
         "playerAugment2": 202,
         "item0": 3157,
         "item1": 3089,
         "challenges": {
+            "teamDamagePercentage": 0.456,
             "skillshotsHit": 13,
             "skillshotsDodged": 42,
         },
@@ -586,6 +588,10 @@ def test_process_recap_cycle_formats_arena_3x6_by_placement():
     assert content.index("**Alpha**") < content.index("**Bravo**")
     assert "Place #1" in content
     assert "Place #4" in content
+    assert "Team Dmg 45.6%" in content
+    assert "🩸 `Taken 18,000`" in content
+    assert "Healing 1,200" in content
+    assert "Shielded 2,345" in content
     assert "Skillshots hit 13" in content
     assert "Dodged 42" in content
     assert "Augments Warmup Routine, Scoped Weapons" in content
