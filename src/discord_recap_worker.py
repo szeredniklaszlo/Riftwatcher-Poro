@@ -3,6 +3,7 @@ from datetime import datetime
 
 import requests
 
+from src import config as cfg
 from src.arena_static import load_arena_display_names
 from src.discord_text import (
     ARENA_QUEUE_IDS,
@@ -18,6 +19,8 @@ from src.discord_text import (
     streak_tts_enabled_state_key,
 )
 from src.report_logic import derive_primary_role, get_match_duration_seconds, get_match_end_unix_seconds, get_mode_bucket, is_remake_match
+from src.discord_ui import MatchRecapView, format_detailed_scoreboard
+from src.static_data import get_static_data
 
 
 async def get_ranked_streak_info(riot_client, puuid, recent_ids, max_matches=20):
@@ -177,37 +180,148 @@ async def process_recap_cycle(
     )
 
     match_entries.sort(key=lambda row: row[0])
+
     recap_sections = []
+    recap_messages_payload = [] # Itt tároljuk a Rich Embedeket
     arena_display_names = None
+
     for end_ts, match_id, queue_id, duration_seconds, tracked_participants in match_entries:
-        queue_name = format_recap_queue_name(queue_id)
-        end_local = datetime.fromtimestamp(end_ts, tz=report_timezone)
-        duration_label = format_match_duration(duration_seconds)
-        lines = [
-            "\U0001F3AE **New Match Recap**",
-            f"`{queue_name}` - \U0001F552 `{end_local:%d.%m.%Y %H:%M}` - \u23F1\uFE0F `{duration_label}`",
-            "",
-        ]
-        if queue_id in ARENA_QUEUE_IDS and arena_display_names is None:
-            arena_display_names = await asyncio.to_thread(load_arena_display_names)
-        augment_names = (arena_display_names or {}).get("augment_names", {})
-        item_names = (arena_display_names or {}).get("item_names", {})
-        ordered_participants = sorted(tracked_participants, key=lambda row: _recap_participant_sort_key(queue_id, row))
-        for index, (riot_id, participant) in enumerate(ordered_participants):
-            lines.append(
-                format_recap_player_line(
-                    riot_id,
-                    participant,
-                    duration_seconds,
-                    queue_id=queue_id,
-                    augment_names=augment_names,
-                    item_names=item_names,
+
+        # =====================================================================
+        # V2.0: RICH EMBED NÉZET (OPCIONÁLIS)
+        # =====================================================================
+        if getattr(cfg, "ENABLE_RICH_RECAPS", False):
+            try:
+                static_data = get_static_data() # Lusta betöltés (Lazy Load)
+
+                match_info = await riot_client.fetch_match_info(match_id)
+                participants = match_info.get("info", {}).get("participants", [])
+                queue_name = format_recap_queue_name(queue_id)
+                end_local = datetime.fromtimestamp(end_ts, tz=report_timezone)
+                duration_label = format_match_duration(duration_seconds)
+
+                # A figyelt játékos adatai
+                primary_friend_riot_id = tracked_participants[0][0]
+                primary_friend_puuid = puuid_by_riot_id[primary_friend_riot_id]
+                is_win = False
+                primary_champ = "Poro"
+
+                for p in participants:
+                    if p.get("puuid") == primary_friend_puuid:
+                        is_win = p.get("win", False)
+                        primary_champ = p.get("championName", "Poro")
+                        break
+
+                import discord
+                embed_color = discord.Color.green() if is_win else discord.Color.red()
+
+                # A játékos szerepe és hőse
+                primary_p = None
+                for p in participants:
+                    if p.get("puuid") == primary_friend_puuid:
+                        primary_p = p
+                        break
+
+                raw_champ = primary_p.get("championName", "Poro") if primary_p else "Poro"
+                champ_display = static_data.get("champions", {}).get(raw_champ, raw_champ)
+                role = str(primary_p.get("teamPosition", "")).upper()[:3] if primary_p else "ANY"
+                if role == "UTI": role = "SUP"
+
+                # 1. CÍM (Title) - Új, tökéletes dizájn
+                short_name = primary_friend_riot_id.split('#')[0]
+                rank_suffix = ""
+
+                if queue_id in (420, 440):
+                    try:
+                        ranked_entries = await riot_client.fetch_ranked_entries(primary_friend_riot_id)
+                        queue_type = "RANKED_SOLO_5x5" if queue_id == 420 else "RANKED_FLEX_SR"
+                        for entry in ranked_entries:
+                            if entry.get("queueType") == queue_type:
+                                tier = str(entry.get("tier", "")).title()
+                                rank = str(entry.get("rank", ""))
+                                lp = entry.get("leaguePoints", 0)
+                                rank_suffix = f" • {tier} {rank} ({lp} LP)"
+                                break
+                    except Exception as e:
+                        log(f"[recap] Rank fetch timeout/error for {primary_friend_riot_id}: {e}")
+
+                # Példa: 🏆 Ranked Solo/Duo • MID • Katarina (Joacoking) • Emerald IV (44 LP)
+                embed_title = f"{queue_name} • {role} • {champ_display} ({short_name}){rank_suffix}"
+
+                # 2. LÁBJEGYZET (Footer) - Letisztítva
+                region_raw = match_id.split("_")[0].upper()
+                region_display = "EUNE" if region_raw == "EUN1" else ("EUW" if region_raw == "EUW1" else region_raw)
+
+                ally_friends = []
+                for p in participants:
+                    if p.get("puuid") in puuid_by_riot_id.values() and p.get("puuid") != primary_friend_puuid:
+                        ally_name = p.get("riotIdGameName") or p.get("summonerName") or "Unknown"
+                        ally_friends.append(ally_name)
+                allies_text = f" • Allies: {', '.join(ally_friends)}" if ally_friends else ""
+
+                footer_text = f"Region: {region_display}{allies_text}\nFinished: {end_local:%Y.%m.%d %H:%M} • ⏱️ {duration_label}"
+
+                # 3. EMBED LÉTREHOZÁSA
+                embed = discord.Embed(
+                    title=embed_title,
+                    description=format_detailed_scoreboard(participants, list(puuid_by_riot_id.values()), static_data),
+                    color=embed_color
                 )
-            )
-            if index < len(ordered_participants) - 1:
-                lines.append("")
-        recap_sections.append("\n".join(lines))
-        log(f"[recap] Prepared new match recap for {match_id} in channel {match_recap_channel_id}.")
+                embed.set_footer(text=footer_text)
+
+                # 4. GIGANTIKUS SPLASH ART AZ ALJZATRA
+                skin_num = primary_p.get("skin", 0) if primary_p else 0
+                splash_url = f"https://ddragon.leagueoflegends.com/cdn/img/champion/splash/{raw_champ}_{skin_num}.jpg"
+                embed.set_image(url=splash_url) # VISSZATETTÜK IDE!
+
+                match_data = {
+                    "match_id": match_id,
+                    "primary_friend_riot_id": primary_friend_riot_id,
+                    "participants": participants
+                }
+                view = MatchRecapView(match_data, list(puuid_by_riot_id.values()), static_data)
+
+                # A "content" mező kikerült, csak embed és view maradt!
+                recap_messages_payload.append({
+                    "embed": embed,
+                    "view": view
+                })
+                log(f"[recap] Prepared rich embed recap for {match_id}")
+            except Exception as e:
+                log(f"[recap] Error building rich embed for {match_id}: {e}")
+
+        # =====================================================================
+        # V1.0: KLASSZIKUS SZÖVEGES NÉZET (VISSZAFELÉ KOMPATIBILITÁS)
+        # =====================================================================
+        else:
+            queue_name = format_recap_queue_name(queue_id)
+            end_local = datetime.fromtimestamp(end_ts, tz=report_timezone)
+            duration_label = format_match_duration(duration_seconds)
+            lines = [
+                "🎮 **New Match Recap**",
+                f"`{queue_name}` - 🕒 `{end_local:%d.%m.%Y %H:%M}` - ⏱️ `{duration_label}`",
+                "",
+            ]
+            if queue_id in ARENA_QUEUE_IDS and arena_display_names is None:
+                arena_display_names = await asyncio.to_thread(load_arena_display_names)
+            augment_names = (arena_display_names or {}).get("augment_names", {})
+            item_names = (arena_display_names or {}).get("item_names", {})
+            ordered_participants = sorted(tracked_participants, key=lambda row: _recap_participant_sort_key(queue_id, row))
+            for index, (riot_id, participant) in enumerate(ordered_participants):
+                lines.append(
+                    format_recap_player_line(
+                        riot_id,
+                        participant,
+                        duration_seconds,
+                        queue_id=queue_id,
+                        augment_names=augment_names,
+                        item_names=item_names,
+                    )
+                )
+                if index < len(ordered_participants) - 1:
+                    lines.append("")
+            recap_sections.append("\n".join(lines))
+            log(f"[recap] Prepared classic match recap for {match_id}")
 
     recap_messages = _pack_sections_into_messages(recap_sections, recap_section_separator)
 
@@ -258,15 +372,20 @@ async def process_recap_cycle(
         except Exception as exc:
             log(f"[recap] Streak callout skipped for {riot_id}: {exc}")
 
-    for index, recap_message in enumerate(recap_messages):
-        await channel.send(recap_message)
-        if index < len(recap_messages) - 1:
-            await asyncio.sleep(recap_split_spacing_seconds)
-    if recap_messages:
-        log(
-            f"[recap] Posted recap batch in channel {match_recap_channel_id}: "
-            f"matches={len(recap_sections)} messages={len(recap_messages)}."
-        )
+    if getattr(cfg, "ENABLE_RICH_RECAPS", False):
+        for index, payload in enumerate(recap_messages_payload):
+            await channel.send(embed=payload["embed"], view=payload["view"])
+            if index < len(recap_messages_payload) - 1:
+                await asyncio.sleep(recap_split_spacing_seconds)
+        if recap_messages_payload:
+            log(f"[recap] Posted RICH recap batch in channel {match_recap_channel_id}: matches={len(recap_messages_payload)}.")
+    else:
+        for index, recap_message in enumerate(recap_messages):
+            await channel.send(recap_message)
+            if index < len(recap_messages) - 1:
+                await asyncio.sleep(recap_split_spacing_seconds)
+        if recap_messages:
+            log(f"[recap] Posted CLASSIC recap batch in channel {match_recap_channel_id}: matches={len(recap_sections)} messages={len(recap_messages)}.")
 
     streak_tts_enabled = True
     try:

@@ -85,9 +85,20 @@ MATCH_RECAP_CHANNEL_ID = int(require_env("MATCH_RECAP_CHANNEL_ID"))
 MATCH_RECAP_POLL_SECONDS = get_env_int("MATCH_RECAP_POLL_SECONDS", 90)
 DATABASE_URL = require_env("DATABASE_URL")
 DB_POOL_SIZE = get_env_int("DB_POOL_SIZE", 5)
+
 # --- Low-resource optimizations ---
 STARTUP_PREFER_SNAPSHOT = get_env_bool("STARTUP_PREFER_SNAPSHOT", False)
 BASELINE_MATCH_LIMIT = get_env_int("BASELINE_MATCH_LIMIT", 5000)
 RIOT_REQUEST_YIELD_SECONDS = float(get_env_str("RIOT_REQUEST_YIELD_SECONDS", "0.0"))
 ASYNCIO_THREAD_POOL_SIZE = get_env_int("ASYNCIO_THREAD_POOL_SIZE", 0)
 WORKER_STAGGER_SECONDS = get_env_int("WORKER_STAGGER_SECONDS", 0)
+
+# --- Discord UI & Emojis ---
+ENABLE_RICH_RECAPS = get_env_bool("ENABLE_RICH_RECAPS", False)
+
+BAR_LEFT_FULL = get_env_str("BAR_LEFT_FULL", "🟩") # e.g.: "<:lb_g:123456789>"
+BAR_MID_FULL = get_env_str("BAR_MID_FULL", "🟩")   # e.g.: "<:l_g:123456789>"
+BAR_RIGHT_FULL = get_env_str("BAR_RIGHT_FULL", "🟩")
+BAR_LEFT_EMPTY = get_env_str("BAR_LEFT_EMPTY", "⬛")
+BAR_MID_EMPTY = get_env_str("BAR_MID_EMPTY", "⬛")
+BAR_RIGHT_EMPTY = get_env_str("BAR_RIGHT_EMPTY", "⬛")
