@@ -1,4 +1,5 @@
 import discord
+import urllib.parse
 from src import config as cfg
 
 LOG_REGION_MAP = {
@@ -25,6 +26,7 @@ def get_emo(emojis_dict, raw_id, prefix=""):
         return None
     return emojis_dict.get(raw_id, emojis_dict.get(f"{prefix}{raw_id}"))
 
+# --- PLAYER INFO NÉZET ---
 def apply_player_summary_fields(embed, primary_p, tier_str, static_data, timeline_data):
     emojis = static_data.get("emojis", {})
     runes_map = static_data.get("runes", {})
@@ -117,12 +119,12 @@ def apply_player_summary_fields(embed, primary_p, tier_str, static_data, timelin
     embed.add_field(name="Item Build Path", value=item_path, inline=False)
 
 
-# --- OSZLOPOS NÉZETEK LOGIKÁJA ---
+# --- OSZLOPOS (SIDE-BY-SIDE) LOGIKA ---
 
 def get_sorted_teams(participants):
     teams = {}
     for p in participants:
-        t_id = p.get("teamId", 0)
+        t_id = p.get("playerSubteamId") or p.get("subteamId") or p.get("teamId", 0)
         if t_id not in teams:
             teams[t_id] = []
         teams[t_id].append(p)
@@ -132,10 +134,50 @@ def get_sorted_teams(participants):
         teams[t_id].sort(key=lambda p: role_order.get(str(p.get("teamPosition", "")).upper(), 99))
 
     sorted_teams = sorted(teams.values(), key=len, reverse=True)
-    team_1 = sorted_teams[0] if len(sorted_teams) > 0 else []
-    team_2 = sorted_teams[1] if len(sorted_teams) > 1 else []
+    return sorted_teams
 
-    return team_1, team_2
+def apply_side_by_side_layout(embed, participants, friends_puuids, static_data, generator_func):
+    sorted_teams = get_sorted_teams(participants)
+
+    # 5v5 és egyebek: Blue vs Red
+    if len(sorted_teams) == 2:
+        team_1 = sorted_teams[0]
+        team_2 = sorted_teams[1]
+
+        embed.add_field(name="🔷 **BLUE TEAM**", value="\u200b", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="♦️ **RED TEAM**", value="\u200b", inline=True)
+
+        for i in range(max(len(team_1), len(team_2))):
+            p_blue = team_1[i] if i < len(team_1) else None
+            p_red = team_2[i] if i < len(team_2) else None
+
+            if p_blue:
+                n, v = generator_func(p_blue, friends_puuids, static_data)
+                embed.add_field(name=n, value=v, inline=True)
+            else:
+                embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+            if p_red:
+                n, v = generator_func(p_red, friends_puuids, static_data)
+                embed.add_field(name=n, value=v, inline=True)
+            else:
+                embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+    # Aréna: Csapatok felsorolása 3-as gridben
+    else:
+        for team in sorted_teams:
+            for p in team:
+                n, v = generator_func(p, friends_puuids, static_data)
+                embed.add_field(name=n, value=v, inline=True)
+
+            while len(embed.fields) % 3 != 0:
+                embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+
+# --- MEZŐ GENERÁTOROK ---
 
 def generate_scoreboard_field(p, friends_puuids, static_data):
     emojis = static_data.get("emojis", {})
@@ -207,77 +249,54 @@ def generate_builds_field(p, friends_puuids, static_data):
     )
     return title, value
 
-def apply_side_by_side_layout(embed, participants, friends_puuids, static_data, generator_func):
-    team_1, team_2 = get_sorted_teams(participants)
-
-    if not team_2:
-        for p in team_1:
-            n, v = generator_func(p, friends_puuids, static_data)
-            embed.add_field(name=n, value=v, inline=False)
-        return
-
-    embed.add_field(name="🔷 **BLUE TEAM**", value="\u200b", inline=True)
-    embed.add_field(name="♦️ **RED TEAM**", value="\u200b", inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True)
-
-    for i in range(max(len(team_1), len(team_2))):
-        p_blue = team_1[i] if i < len(team_1) else None
-        p_red = team_2[i] if i < len(team_2) else None
-
-        if p_blue:
-            n, v = generator_func(p_blue, friends_puuids, static_data)
-            embed.add_field(name=n, value=v, inline=True)
-        else:
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
-
-        if p_red:
-            n, v = generator_func(p_red, friends_puuids, static_data)
-            embed.add_field(name=n, value=v, inline=True)
-        else:
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
-
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
-
-
-# --- GRAFIKUS NÉZETEK LOGIKÁJA ---
-
-def format_graph_text(participants, friends_puuids, data_sets, title, static_data, bar_length=10):
+def generate_graph_field(p, friends_puuids, static_data, data_sets, max_val, bar_length):
     emojis = static_data.get("emojis", {})
-    lines = [f"**📊 {title.upper()}**\n"]
+    name = p.get("riotIdGameName") or p.get("summonerName") or "Unknown"
+    is_friend = "🌟" if p.get("puuid") in friends_puuids else ""
+
+    role_key = str(p.get("teamPosition", "")).lower()
+    if not role_key or role_key == "inv": role_key = "any"
+    role_emoji = get_emo(emojis, role_key, "role_") or ""
+
+    raw_champ = str(p.get("championName", "Unknown"))
+    champ_emoji = get_emo(emojis, raw_champ, "champ_") or ""
 
     primary_key = data_sets[0][0]
-    max_val = max((int(p.get(primary_key, 0) or 0) for p in participants), default=1)
-    if max_val == 0: max_val = 1
+    primary_val = int(p.get(primary_key, 0) or 0)
+    percentage = primary_val / max_val
+    bar = generate_emoji_bar(percentage, length=bar_length)
 
-    sorted_participants = sorted(participants, key=lambda p: 0 if p.get("puuid") in friends_puuids else 1)
+    val_str = f"{primary_val/1000:.1f}k" if primary_val >= 1000 else str(primary_val)
 
-    for p in sorted_participants:
-        raw_champ = str(p.get("championName", "Unknown"))
-        champ_emoji = get_emo(emojis, raw_champ, "champ_") or ""
-        name = p.get("riotIdGameName") or p.get("summonerName") or "Unknown"
-        is_friend = " 🌟" if p.get("puuid") in friends_puuids else ""
+    title = f"{role_emoji} {champ_emoji} **{name}** {is_friend} | **{val_str}**"
+    lines = [f"{bar}"]
 
-        primary_val = int(p.get(primary_key, 0) or 0)
-        percentage = primary_val / max_val
-        bar = generate_emoji_bar(percentage, length=bar_length)
+    if len(data_sets) > 1:
+        if primary_key in ("totalDamageDealtToChampions", "totalDamageTaken"):
+            val_phys = int(p.get(data_sets[1][0], 0) or 0)
+            val_mag = int(p.get(data_sets[2][0], 0) or 0)
+            val_true = int(p.get(data_sets[3][0], 0) or 0)
 
-        val_str = f"{primary_val/1000:.1f}k".rjust(6) if primary_val >= 1000 else str(primary_val).rjust(6)
+            str_phys = f"{val_phys/1000:.1f}k" if val_phys >= 1000 else str(val_phys)
+            str_mag = f"{val_mag/1000:.1f}k" if val_mag >= 1000 else str(val_mag)
+            str_true = f"{val_true/1000:.1f}k" if val_true >= 1000 else str(val_true)
 
-        lines.append(f"{champ_emoji} **{name}**{is_friend} | **{val_str}**")
-        lines.append(f"{bar}")
+            emo_phys = get_emo(emojis, data_sets[1][1]) or data_sets[1][2]
+            emo_mag = get_emo(emojis, data_sets[2][1]) or data_sets[2][2]
+            emo_true = get_emo(emojis, data_sets[3][1]) or data_sets[3][2]
 
-        if len(data_sets) > 1:
-            details = []
-            for stat_key, custom_emo_name, fallback_emo, label in data_sets[1:]:
-                val = int(p.get(stat_key, 0) or 0)
-                val_formatted = f"{val/1000:.1f}k" if val >= 1000 else str(val)
-                emo = get_emo(emojis, custom_emo_name) or fallback_emo
-                details.append(f"{emo} {label}:\u00A0`{val_formatted}`")
-            lines.append(f"> {' • '.join(details)}")
+            lines.append(f"{emo_phys} `{str_phys}` • {emo_mag} `{str_mag}`\n{emo_true} `{str_true}`")
 
-        lines.append("")
+        elif primary_key == "visionScore":
+            val_placed = int(p.get(data_sets[1][0], 0) or 0)
+            val_cleared = int(p.get(data_sets[2][0], 0) or 0)
 
-    return "\n".join(lines).strip()
+            emo_placed = get_emo(emojis, data_sets[1][1]) or data_sets[1][2]
+            emo_cleared = get_emo(emojis, data_sets[2][1]) or data_sets[2][2]
+
+            lines.append(f"{emo_placed} `{val_placed}` • {emo_cleared} `{val_cleared}`")
+
+    return title, "\n".join(lines)
 
 
 # --- DISCORD UI VIEW ---
@@ -297,31 +316,39 @@ class MatchRecapView(discord.ui.View):
         log_url = f"https://www.leagueofgraphs.com/match/{log_region}/{match_num}"
 
         full_riot_id = match_data["primary_friend_riot_id"]
-        ugg_riot_id = full_riot_id.replace("#", "-").lower()
+        ugg_riot_id = urllib.parse.quote(full_riot_id.replace("#", "-").lower())
         ugg_url = f"https://u.gg/lol/profile/{region_raw}/{ugg_riot_id}/overview"
+
+        # Csatapatok elemzése Aréna módhoz és beállításokhoz
+        sorted_teams = get_sorted_teams(self.match_data["participants"])
+        self.is_arena = len(sorted_teams) > 2
+        self.max_team_size = max((len(t) for t in sorted_teams), default=1)
 
         self.add_item(discord.ui.Button(label="LeagueOfGraphs", url=log_url, row=2))
         self.add_item(discord.ui.Button(label="U.GG Profile", url=ugg_url, row=2))
 
+        # Gombok dinamikus elrejtése Aréna esetén
+        if self.is_arena:
+            to_remove = {"Player Info", "Turrets", "Objectives", "Vision"}
+            for child in list(self.children):
+                if getattr(child, "label", "") in to_remove:
+                    self.remove_item(child)
+
         # --- DINAMIKUS EMOJI A GOMBON ---
-        # Lekérjük a Hős Emojit, majd beállítjuk a Champion Info gombra
         raw_champ = str(match_data["primary_p"].get("championName", "Unknown"))
         champ_emoji_str = get_emo(static_data.get("emojis", {}), raw_champ, "champ_")
 
         if champ_emoji_str and champ_emoji_str.startswith("<:"):
             try:
-                # String darabolása, pl: "<:champ_Ahri:123456789>" -> név: champ_Ahri, id: 123456789
                 parts = champ_emoji_str.strip("<>").split(":")
                 if len(parts) == 3:
                     champ_emoji_obj = discord.PartialEmoji(name=parts[1], id=int(parts[2]))
-                    # Megkeressük a "Champion Info" gombot a Children listában
                     for child in self.children:
-                        if getattr(child, "label", "") == "Champion Info":
+                        if getattr(child, "label", "") == "Player Info":
                             child.emoji = champ_emoji_obj
                             break
             except Exception:
                 pass
-
 
     async def update_state(self, interaction, clicked_button):
         for child in self.children:
@@ -360,7 +387,21 @@ class MatchRecapView(discord.ui.View):
     def apply_graph(self, embed, data_sets, title, bar_length=10):
         embed.clear_fields()
         embed.set_image(url=None)
-        embed.description = format_graph_text(self.match_data["participants"], self.friends_puuids, data_sets, title, self.static_data, bar_length)
+
+        embed.description = f"**📊 {title.upper()}**"
+
+        # Ha 3 fős Aréna módban vagyunk, a grafikon csak 8 emojiból áll, különben marad az átadott érték
+        if self.is_arena and self.max_team_size == 3:
+            bar_length = 8
+
+        primary_key = data_sets[0][0]
+        max_val = max((int(p.get(primary_key, 0) or 0) for p in self.match_data["participants"]), default=1)
+        if max_val == 0: max_val = 1
+
+        def graph_generator(p, friends_puuids, static_data):
+            return generate_graph_field(p, friends_puuids, static_data, data_sets, max_val, bar_length)
+
+        apply_side_by_side_layout(embed, self.match_data["participants"], self.friends_puuids, self.static_data, graph_generator)
 
     # --- GOMBOK ---
 
@@ -374,7 +415,7 @@ class MatchRecapView(discord.ui.View):
         self.apply_builds(interaction.message.embeds[0])
         await self.update_state(interaction, button)
 
-    @discord.ui.button(label="Champion Info", style=discord.ButtonStyle.secondary, emoji="👤", row=0)
+    @discord.ui.button(label="Player Info", style=discord.ButtonStyle.secondary, emoji="👤", row=0)
     async def btn_summary(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.apply_player_summary(interaction.message.embeds[0])
         await self.update_state(interaction, button)
@@ -387,7 +428,7 @@ class MatchRecapView(discord.ui.View):
             ("magicDamageDealtToChampions", "stat_ap", "🪄", "Magic"),
             ("trueDamageDealtToChampions", "stat_true", "🩸", "True")
         ]
-        self.apply_graph(interaction.message.embeds[0], data_sets, "Damage Dealt", bar_length=8)
+        self.apply_graph(interaction.message.embeds[0], data_sets, "Damage Dealt", bar_length=10)
         await self.update_state(interaction, button)
 
     @discord.ui.button(label="Taken", style=discord.ButtonStyle.secondary, emoji="🛡️", row=1)
@@ -398,37 +439,37 @@ class MatchRecapView(discord.ui.View):
             ("magicDamageTaken", "stat_ap", "🪄", "Magic"),
             ("trueDamageTaken", "stat_true", "🩸", "True")
         ]
-        self.apply_graph(interaction.message.embeds[0], data_sets, "Damage Taken", bar_length=8)
+        self.apply_graph(interaction.message.embeds[0], data_sets, "Damage Taken", bar_length=10)
         await self.update_state(interaction, button)
 
     @discord.ui.button(label="Mitigated", style=discord.ButtonStyle.secondary, emoji="🧱", row=1)
     async def btn_mitigated(self, interaction: discord.Interaction, button: discord.ui.Button):
         data_sets = [("damageSelfMitigated", "stat_mitigated", "🧱", "Mitigated")]
-        self.apply_graph(interaction.message.embeds[0], data_sets, "Self Mitigated Damage")
+        self.apply_graph(interaction.message.embeds[0], data_sets, "Self Mitigated Damage", bar_length=10)
         await self.update_state(interaction, button)
 
     @discord.ui.button(label="Turrets", style=discord.ButtonStyle.secondary, emoji="🗼", row=1)
     async def btn_turrets(self, interaction: discord.Interaction, button: discord.ui.Button):
         data_sets = [("damageDealtToTurrets", "stat_turret", "🗼", "Damage")]
-        self.apply_graph(interaction.message.embeds[0], data_sets, "Damage to Turrets")
+        self.apply_graph(interaction.message.embeds[0], data_sets, "Damage to Turrets", bar_length=10)
         await self.update_state(interaction, button)
 
     @discord.ui.button(label="Objectives", style=discord.ButtonStyle.secondary, emoji="🐉", row=1)
     async def btn_obj(self, interaction: discord.Interaction, button: discord.ui.Button):
         data_sets = [("damageDealtToObjectives", "stat_objective", "🐉", "Damage")]
-        self.apply_graph(interaction.message.embeds[0], data_sets, "Damage to Objectives")
+        self.apply_graph(interaction.message.embeds[0], data_sets, "Damage to Objectives", bar_length=10)
         await self.update_state(interaction, button)
 
     @discord.ui.button(label="Healing", style=discord.ButtonStyle.secondary, emoji="💚", row=2)
     async def btn_heal(self, interaction: discord.Interaction, button: discord.ui.Button):
         data_sets = [("totalHeal", "stat_heal", "💚", "Healing")]
-        self.apply_graph(interaction.message.embeds[0], data_sets, "Healing Done")
+        self.apply_graph(interaction.message.embeds[0], data_sets, "Healing Done", bar_length=10)
         await self.update_state(interaction, button)
 
     @discord.ui.button(label="CC", style=discord.ButtonStyle.secondary, emoji="🪄", row=2)
     async def btn_cc(self, interaction: discord.Interaction, button: discord.ui.Button):
         data_sets = [("timeCCingOthers", "stat_cc", "🪄", "CC Score")]
-        self.apply_graph(interaction.message.embeds[0], data_sets, "Crowd Control")
+        self.apply_graph(interaction.message.embeds[0], data_sets, "Crowd Control", bar_length=10)
         await self.update_state(interaction, button)
 
     @discord.ui.button(label="Vision", style=discord.ButtonStyle.secondary, emoji="👁️", row=2)
@@ -438,5 +479,5 @@ class MatchRecapView(discord.ui.View):
             ("wardsPlaced", "stat_ward_placed", "📍", "Placed"),
             ("wardsKilled", "stat_ward_killed", "❌", "Cleared")
         ]
-        self.apply_graph(interaction.message.embeds[0], data_sets, "Vision & Wards", bar_length=9)
+        self.apply_graph(interaction.message.embeds[0], data_sets, "Vision & Wards", bar_length=10)
         await self.update_state(interaction, button)

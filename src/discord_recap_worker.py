@@ -290,33 +290,53 @@ async def process_recap_cycle(
                 profile_icon_id = primary_p.get("profileIcon", 1) if primary_p else 1
                 champ_icon_url = f"https://ddragon.leagueoflegends.com/cdn/{version}/img/champion/{raw_champ}.png"
                 profile_icon_url = f"https://ddragon.leagueoflegends.com/cdn/{version}/img/profileicon/{profile_icon_id}.png"
-
                 skin_num = primary_p.get("skin", 0) if primary_p else 0
                 splash_url = f"https://ddragon.leagueoflegends.com/cdn/img/champion/splash/{raw_champ}_{skin_num}.jpg"
 
-                # Embed létrehozása (a title paraméter eltűnik innen, átmegy az author-ba!)
-                embed = discord.Embed(color=embed_color)
-                embed.set_author(name=embed_title, icon_url=champ_icon_url)
-                embed.set_footer(text=footer_text, icon_url=profile_icon_url)
+                # --- ARÉNA JÁTÉKOK SZÉTVÁGÁSA 2 ÜZENETBE ---
+                is_arena = queue_id in (1700, 1710, 1750)
 
-                match_data = {
-                    "match_id": match_id,
-                    "primary_friend_riot_id": primary_friend_riot_id,
-                    "participants": participants,
-                    "primary_p": primary_p,
-                    "tier_str": tier_str,
-                    "timeline_data": timeline_data,
-                    "splash_url": splash_url
-                }
-                view = MatchRecapView(match_data, list(puuid_by_riot_id.values()), static_data)
+                if is_arena:
+                    def get_placement(p):
+                        for field in ("placement", "subteamPlacement", "teamPlacement"):
+                            if p.get(field) is not None:
+                                return int(p[field])
+                        return 99
 
-                # Rárakjuk az alapértelmezett Scoreboard nézetet
-                view.apply_scoreboard(embed)
+                    # Sorba rendezés helyezés szerint
+                    sorted_parts = sorted(participants, key=get_placement)
+                    half = len(sorted_parts) // 2
 
-                recap_messages_payload.append({
-                    "embed": embed,
-                    "view": view
-                })
+                    # 2 üzenet lesz belőle!
+                    parts_list = [
+                        (sorted_parts[:half], " (Top Teams)"),
+                        (sorted_parts[half:], " (Bottom Teams)")
+                    ]
+                else:
+                    parts_list = [(participants, "")]
+
+                for parts, title_suffix in parts_list:
+                    embed = discord.Embed(color=embed_color)
+                    # CÍM ÉS LÁBLÉC KÉPEK BEÁLLÍTÁSA
+                    embed.set_author(name=embed_title + title_suffix, icon_url=champ_icon_url)
+                    embed.set_footer(text=footer_text, icon_url=profile_icon_url)
+
+                    match_data = {
+                        "match_id": match_id,
+                        "primary_friend_riot_id": primary_friend_riot_id,
+                        "participants": parts, # Már csak az adott üzenet játékosai
+                        "primary_p": primary_p,
+                        "tier_str": tier_str,
+                        "timeline_data": timeline_data,
+                        "splash_url": splash_url
+                    }
+                    view = MatchRecapView(match_data, list(puuid_by_riot_id.values()), static_data)
+                    view.apply_scoreboard(embed)
+
+                    recap_messages_payload.append({
+                        "embed": embed,
+                        "view": view
+                    })
                 log(f"[recap] Prepared rich embed recap for {match_id}")
             except Exception as e:
                 log(f"[recap] Error building rich embed for {match_id}: {e}")
