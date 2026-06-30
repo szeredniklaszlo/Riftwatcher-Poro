@@ -19,7 +19,7 @@ from src.discord_text import (
     streak_tts_enabled_state_key,
 )
 from src.report_logic import derive_primary_role, get_match_duration_seconds, get_match_end_unix_seconds, get_mode_bucket, is_remake_match
-from src.discord_ui import MatchRecapView, format_detailed_scoreboard
+from src.discord_ui import MatchRecapView
 from src.static_data import get_static_data
 
 
@@ -213,6 +213,7 @@ async def process_recap_cycle(
                         break
 
                 import discord
+                from src.discord_ui import apply_player_summary_fields
                 embed_color = discord.Color.green() if is_win else discord.Color.red()
 
                 # A játékos szerepe és hőse
@@ -254,34 +255,64 @@ async def process_recap_cycle(
 
                 ally_friends = []
                 for p in participants:
-                    if p.get("puuid") in puuid_by_riot_id.values() and p.get("puuid") != primary_friend_puuid:
+                    if p.get("puuid") in puuid_by_riot_id.values():
                         ally_name = p.get("riotIdGameName") or p.get("summonerName") or "Unknown"
                         ally_friends.append(ally_name)
                 allies_text = f" • Allies: {', '.join(ally_friends)}" if ally_friends else ""
 
                 footer_text = f"Region: {region_display}{allies_text}\nFinished: {end_local:%Y.%m.%d %H:%M} • ⏱️ {duration_label}"
 
-                # 3. EMBED LÉTREHOZÁSA
-                embed = discord.Embed(
-                    title=embed_title,
-                    description=format_detailed_scoreboard(participants, list(puuid_by_riot_id.values()), static_data),
-                    color=embed_color
-                )
-                embed.set_footer(text=footer_text)
+                # 3. Aktuális Rang Lekérdezése
+                current_rank_text = ""
+                if queue_id in (420, 440):
+                    try:
+                        ranked_entries = await riot_client.fetch_ranked_entries(primary_friend_riot_id)
+                        queue_type = "RANKED_SOLO_5x5" if queue_id == 420 else "RANKED_FLEX_SR"
+                        for entry in ranked_entries:
+                            if entry.get("queueType") == queue_type:
+                                tier = str(entry.get("tier", "")).title()
+                                rank = str(entry.get("rank", ""))
+                                lp = entry.get("leaguePoints", 0)
+                                current_rank_text = f" • {tier} {rank} ({lp} LP)"
+                                break
+                    except Exception as e:
+                        log(f"[recap] Rank fetch timeout/error for {primary_friend_riot_id}: {e}")
 
-                # 4. GIGANTIKUS SPLASH ART AZ ALJZATRA
+                timeline_data = None
+                try:
+                    timeline_data = await riot_client.fetch_match_timeline(match_id)
+                except Exception as e:
+                    log(f"[recap] Timeline fetch timeout/error for {match_id}: {e}")
+
+                tier_str = current_rank_text.split("(")[0].replace("•", "").strip() if current_rank_text else "Unranked"
+                # Képek URL-jeinek legenerálása
+                version = static_data.get("version", "14.1.1")
+                profile_icon_id = primary_p.get("profileIcon", 1) if primary_p else 1
+                champ_icon_url = f"https://ddragon.leagueoflegends.com/cdn/{version}/img/champion/{raw_champ}.png"
+                profile_icon_url = f"https://ddragon.leagueoflegends.com/cdn/{version}/img/profileicon/{profile_icon_id}.png"
+
                 skin_num = primary_p.get("skin", 0) if primary_p else 0
                 splash_url = f"https://ddragon.leagueoflegends.com/cdn/img/champion/splash/{raw_champ}_{skin_num}.jpg"
-                embed.set_image(url=splash_url) # VISSZATETTÜK IDE!
+
+                # Embed létrehozása (a title paraméter eltűnik innen, átmegy az author-ba!)
+                embed = discord.Embed(color=embed_color)
+                embed.set_author(name=embed_title, icon_url=champ_icon_url)
+                embed.set_footer(text=footer_text, icon_url=profile_icon_url)
 
                 match_data = {
                     "match_id": match_id,
                     "primary_friend_riot_id": primary_friend_riot_id,
-                    "participants": participants
+                    "participants": participants,
+                    "primary_p": primary_p,
+                    "tier_str": tier_str,
+                    "timeline_data": timeline_data,
+                    "splash_url": splash_url
                 }
                 view = MatchRecapView(match_data, list(puuid_by_riot_id.values()), static_data)
 
-                # A "content" mező kikerült, csak embed és view maradt!
+                # Rárakjuk az alapértelmezett Scoreboard nézetet
+                view.apply_scoreboard(embed)
+
                 recap_messages_payload.append({
                     "embed": embed,
                     "view": view

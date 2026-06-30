@@ -383,6 +383,10 @@ class RiotApiClient:
         await asyncio.to_thread(self.db_upsert_match_info, match_id, match_info)
         return match_info
 
+    async def fetch_match_timeline(self, match_id, *, request_tier="priority"):
+        url = f"https://{self.riot_regional_routing}.api.riotgames.com/lol/match/v5/matches/{match_id}/timeline"
+        return await self.riot_get_json_async(url, request_tier=request_tier)
+
     async def fetch_summoner_id(self, puuid):
         if puuid in self.summoner_id_cache:
             return self.summoner_id_cache[puuid]
